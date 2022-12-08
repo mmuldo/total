@@ -177,26 +177,17 @@ int main(void) {
     // set system clock
     set_sys_clock_khz(CLK_KHZ, true); 
 
-    // for querying user input on whether or not to run again once complete.
-    // default to no
-    char run_again = 'n';
+    // launch core 1 code
+    multicore_reset_core1();
+    multicore_launch_core1(core1_entry);
 
-    do {
-        // launch core 1 code
-        multicore_reset_core1();
-        multicore_launch_core1(core1_entry);
+    // get sine frequency from serial input
+    uint32_t sine_freq;
+    scanf("%d", &sine_freq);
+    // send frequency to core 1
+    multicore_fifo_push_blocking(sine_freq);
 
-        // get sine frequency from serial input
-        uint32_t sine_freq;
-        scanf("%d", &sine_freq);
-        // send frequency to core 1
-        multicore_fifo_push_blocking(sine_freq);
-
-        sample_signals(sine_freq);
-
-        // query user to run again
-        scanf("%c", &run_again);
-    } while (run_again == 'y' || run_again == 'Y');
+    sample_signals(sine_freq);
 
     return 0;
 }

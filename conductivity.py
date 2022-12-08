@@ -27,6 +27,17 @@ def init_serial() -> serial.Serial:
 
     return ser
 
+def plot(vin, vout, freq):
+    t_vin = np.linspace(0, 1/int(freq), len(vin))
+    t_vout = np.linspace(0, 1/int(freq), len(vout))
+    plt.plot(t_vin, vin)
+    plt.plot(t_vout, vout)
+    plt.xlabel('s')
+    plt.ylabel('V')
+    plt.legend(['input signal to sensor', 'signal output from sensor'])
+    plt.title(f'{freq} Hz frequency')
+    plt.show()
+
 def read_conductivity(ser: serial.Serial):
     # wait a second to make sure everything's good
     time.sleep(1)
@@ -46,10 +57,10 @@ def read_conductivity(ser: serial.Serial):
         readings.append(float(reading))
 
     num_readings = len(readings)
-    vin = np.array(readings[:int(num_readings/2)])
-    vout = np.array(readings[int(num_readings/2):])
-    plt.plot(vin)
-    plt.show()
+    num_vin_readings = int(num_readings/2)
+    vin = np.array(readings[:num_vin_readings])
+    vout = np.array(readings[num_vin_readings:])
+    #plot(vin, vout, freq)
 
     # phase shift
     phi = np.arccos(np.dot(vin, vout) / (np.linalg.norm(vin) * np.linalg.norm(vout)))
@@ -67,20 +78,12 @@ def main():
     # initialize serial i/o
     ser = init_serial()
 
-    # if 'y', runs loop below
-    run_again = 'y'
+    print('Please input a frequency at which to run conductivity sensor.')
+    # get measurement and print it out
+    read_conductivity(ser)
 
-    while run_again in ['y', 'Y']:
-        print('Please input a frequency at which to run conductivity sensor.')
-        # get measurement and print it out
-        read_conductivity(ser)
-
-        input('Would you like to run another measurement [y/N]: ')
-        # pass input to serial i/o
-        ser.write(run_again.encode('utf-8'))
-
-        # newline for spacing
-        print()
+    # newline for spacing
+    print()
 
 if __name__ == '__main__':
     main()
