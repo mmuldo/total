@@ -1,13 +1,19 @@
 import serial
-import sys
 import time
 from matplotlib import pyplot as plt
 import numpy as np
+from typing import Any
 
+# serial port of raspberry pi pico
+# change to whichever port pico comes up on
 SERIAL_PORT = '/dev/ttyACM0'
+
+# rate at which information is transferred over serial port
 BAUDRATE = 115200
 
+# minimum frequency at which sensor can measure impedence
 MIN_FREQ_HZ = 200
+# maximum frequency at which sensor can measure impedence
 MAX_FREQ_HZ = 1000
 
 def init_serial() -> serial.Serial:
@@ -27,26 +33,170 @@ def init_serial() -> serial.Serial:
 
     return ser
 
-def plot(vin, vout, freq):
+def plot(
+    vin: np.ndarray,
+    vout: np.ndarray,
+    freq: Any
+):
+    '''
+    plots the input signal and output signal read in on the adc pins of the pico
+
+    Parameters
+    ----------
+    vin : np.ndarray
+        signal being fed into the impedence that is being sensed
+    vout : np.ndarray
+        output signal from the impedence that is being sensed
+    freq : Any
+        frequency of signals. must be convertible to an int.
+    '''
+    # setup time axis
+    # note that they are ideally being plotted over one period, hence the
+    # stop time of 1/freq
     t_vin = np.linspace(0, 1/int(freq), len(vin))
     t_vout = np.linspace(0, 1/int(freq), len(vout))
+
+    # plot
     plt.plot(t_vin, vin)
     plt.plot(t_vout, vout)
+
+    # set labels and title, etc.
     plt.xlabel('s')
     plt.ylabel('V')
     plt.legend(['input signal to sensor', 'signal output from sensor'])
     plt.title(f'{freq} Hz frequency')
+
     plt.show()
 
+def impedence_dot_product(
+    sin_input: np.ndarray,
+    sin_output: np.ndarray,
+    Rf: float = 1,
+    offset: float = 0
+) -> complex:
+    '''
+    calculates the impedence given the input and output signals using a dot
+    product approximation.
+
+    with the circuit we have, the impedence is given by:
+        Z = -Rf(|Vin|/|Vout|)exp(-j phase_shift)
+    where Z is the complex impedence in phaser form, Rf is the resistor used
+    in the transimpdence amplifier, |Vin| is the magnitude of the Vin sine wave,
+    |Vout| is the magnitude of the |Vout| sine wave, and phase_shift is the
+    difference in phase between Vin and Vout.
+
+    the inner product between two sines is defined as:
+        <sin1, sin2> = Integral from -Pi to Pi of (sine1 * sine2)
+    this can be approximated as a reimann sum, which ends up just being the
+    vector dot product of the sampled version of the two sines, enabling the
+    techniques used in this function.
+
+    Parameters
+    ----------
+    sin_input : np.ndarray
+        signal being fed into the impedence that is being sensed
+    sin_output : np.ndarray
+        output signal from the impedence that is being sensed
+    Rf : float
+        value of the resistor used in the transimpedence amplifier, in ohms
+    offset : float
+        the dc offset from zero of the two signals, in volts
+
+    Returns
+    -------
+    complex
+        complex impedance in cartesian form
+    '''
+    # remove the dc offset
+    sin_input_offset = sin_input - offset
+    sin_output_offset = sin_output - offset
+
+    # amplitude gain/loss
+    mag_impedence = -Rf*np.linalg.norm(sin_input_offset)/np.linalg.norm(sin_output_offset)
+    # phase shift
+    phase_impedence = np.arccos(
+        np.dot(sin_input_offset, sin_output_offset) / (
+            np.linalg.norm(sin_input_offset) * np.linalg.norm(sin_output_offset)
+        )
+    )
+
+    # resistance
+    R = mag_impedence * np.cos(phase_impedence)
+    # reactance
+    X = mag_impedence * np.sin(phase_impedence)
+    return R + X*1j
+
+def impedence_brute_force(
+    sin_input: np.ndarray,
+    sin_output: np.ndarray,
+    Rf: float = 1,
+    offset: float = 0
+):
+    '''
+    calculates the impedence given the input and output signals using a sort
+    of "brute force" technique.
+
+    the method is as follows: find the max value in both sampled signals, and
+    assume these values approximate the magnitudes. then find the location
+    that these max values occur and subtract them (along with some other operations)
+    to get the approximate phase shift.
+
+    Parameters
+    ----------
+    sin_input : np.ndarray
+        signal being fed into the impedence that is being sensed
+    sin_output : np.ndarray
+        output signal from the impedence that is being sensed
+    Rf : float
+        value of the resistor used in the transimpedence amplifier, in ohms
+    offset : float
+        the dc offset from zero of the two signals, in volts
+
+    Returns
+    -------
+    complex
+        complex impedance in cartesian form
+    '''
+    # remove dc offset
+    sin_input_offset = sin_input - offset
+    sin_output_offset = sin_output - offset
+
+    mag_input = sin_input_offset.max()
+    mag_output = sin_output_offset.max()
+
+    # amplitude gain/loss
+    mag_impedence = -Rf * mag_input/mag_output
+
+    # phase shift
+    phase_impedence = 2*np.pi*(sin_output.argmax() - sin_input.argmax())/len(sin_input)
+
+    # resistance
+    R = mag_impedence * np.cos(phase_impedence)
+    # reactance
+    X = mag_impedence * np.sin(phase_impedence)
+    return R + X*1j
+
 def read_conductivity(ser: serial.Serial):
+    '''
+    prompts user for frequency input, then sends job to pico over serial i/o.
+    pico then returns sampled singals over serial i/o, which are used to calcuate
+    the impedence. the impedence is then printed.
+
+    Parameters
+    ----------
+    ser : serial.Serial
+        serial i/o connection
+    '''
     # wait a second to make sure everything's good
     time.sleep(1)
 
+    # get frequency from user
     freq = input(f'Frequency [{MIN_FREQ_HZ} - {MAX_FREQ_HZ} Hz]: ')
     while not (freq.isdigit() and int(freq) >= MIN_FREQ_HZ and int(freq) <= MAX_FREQ_HZ):
+        # keep prompting until user input is valid
         freq = input(f'Input invalid. Please input an integer frequency between 200 and 1000 Hz: ')
 
-    # write the frequency input
+    # write the frequency input to serial port
     ser.write(f'{freq}\n'.encode('utf-8'))
 
     # wait for readings to be taken
@@ -57,22 +207,22 @@ def read_conductivity(ser: serial.Serial):
         readings.append(float(reading))
 
     num_readings = len(readings)
+    # assume the vin readings are the first half of readings
     num_vin_readings = int(num_readings/2)
     vin = np.array(readings[:num_vin_readings])
+    # assume the vout readings are the second half of readings
     vout = np.array(readings[num_vin_readings:])
-    #plot(vin, vout, freq)
 
-    # phase shift
-    phi = np.arccos(np.dot(vin, vout) / (np.linalg.norm(vin) * np.linalg.norm(vout)))
-    # amplitude gain/loss
-    G = np.linalg.norm(vout)/np.linalg.norm(vin)
+    # uncomment if you want to see plots
+    # comment out if you don't want to see plots
+    plot(vin, vout, freq)
 
-    # resistance (real)
-    R = G * np.cos(phi)
-    # reactance (imaginary)
-    X = G * np.sin(phi)
+    # choose which method of impedence calculation to use
+    #impedence = impedence_dot_product(vin, vout, Rf=100e3, offset=0)
+    impedence = impedence_brute_force(vin, vout, Rf=100e3, offset=0)
 
-    print(f'Impedence: {R} + j{X}')
+    print(f'Impedence: {impedence}')
+
 
 def main():
     # initialize serial i/o
