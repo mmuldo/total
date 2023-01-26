@@ -1,4 +1,6 @@
 import serial
+import sys
+import glob
 import time
 from matplotlib import pyplot as plt
 import numpy as np
@@ -6,7 +8,7 @@ from typing import Any
 
 # serial port of raspberry pi pico
 # change to whichever port pico comes up on
-SERIAL_PORT = '/dev/ttyACM0'
+SERIAL_PORT = '/dev/ttyACM1'
 
 # rate at which information is transferred over serial port
 BAUDRATE = 115200
@@ -16,14 +18,54 @@ MIN_FREQ_HZ = 200
 # maximum frequency at which sensor can measure impedence
 MAX_FREQ_HZ = 1000
 
+def serial_ports():
+    """
+    Lists serial port names
+
+    Raises
+    ------
+    EnvironmentError:
+        On unsupported or unknown platforms
+
+    Returns
+    -------
+        A list of the serial ports available on the system
+    """
+    if sys.platform.startswith('win'):
+        ports = ['COM%s' % (i + 1) for i in range(256)]
+    elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin'):
+        # this excludes your current terminal "/dev/tty"
+        ports = glob.glob('/dev/tty[A-Za-z]*')
+    elif sys.platform.startswith('darwin'):
+        ports = glob.glob('/dev/tty.*')
+    else:
+        raise EnvironmentError('Unsupported platform')
+
+    result = []
+    for port in ports:
+        try:
+            s = serial.Serial(port)
+            s.close()
+            result.append(port)
+        except (OSError, serial.SerialException):
+            pass
+    return result
+
 def init_serial() -> serial.Serial:
     '''
     initialize serial i/o
     '''
     try:
-        ser = serial.Serial(port=SERIAL_PORT, baudrate=BAUDRATE)
+        serial_port = serial_ports()[0]
+        ser = serial.Serial(port=serial_port, baudrate=BAUDRATE)
     except serial.SerialException:
-        print(f'Serial port {SERIAL_PORT} not detected. Check connection and try again.')
+        print(f'Serial port {serial_port} not detected. Check connection and try again.')
+        exit(1)
+    except IndexError:
+        print('No serial port detected')
+        exit(1)
+    except EnvironmentError as e:
+        print(e)
         exit(1)
     
     # dummy write character to initialize the board's serial i/o.
@@ -175,6 +217,35 @@ def impedence_brute_force(
     # reactance
     X = mag_impedence * np.sin(phase_impedence)
     return R + X*1j
+
+def get_one_period(sin_samples: np.ndarray) -> np.ndarray:
+    '''
+    given a sampled arbitrary length sin wave, return one period of the
+    wave starting at the first sample
+
+    Parameters
+    ----------
+    sin_samples : np.ndarray
+        the sampled sin wave, multiple periods in general
+    
+    Returns
+    -------
+    np.ndarray
+        one period of the sin wave starting at the first sample
+    '''
+    zero_crossings = 0
+
+    i = 0
+    prev_polarity = np.sign(sin_samples[0])
+    for _ in len(sin_samples):
+        polarity = np.sign(sin_samples[i])
+        if polarity != prev_polarity:
+            zero_crossings += 1
+        prev_polarity = polarity
+    #TODO
+
+        
+
 
 def read_conductivity(ser: serial.Serial):
     '''

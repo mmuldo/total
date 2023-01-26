@@ -42,6 +42,7 @@ target_link_libraries(conductivity
         hardware_clocks
         hardware_pwm
         hardware_adc
+        hardware_watchdog
         )
 
 pico_add_extra_outputs(conductivity)

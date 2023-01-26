@@ -6,6 +6,7 @@
 #include "hardware/sync.h" 
 #include "hardware/gpio.h"
 #include "hardware/adc.h"
+#include "hardware/watchdog.h"
  
 // pins to switch between for adc round robin sampling
 #define ADC_PIN_MASK 0b0011
@@ -177,17 +178,20 @@ int main(void) {
     // set system clock
     set_sys_clock_khz(CLK_KHZ, true); 
 
-    // launch core 1 code
-    multicore_reset_core1();
-    multicore_launch_core1(core1_entry);
+    //while (true) {
+        // launch core 1 code
+        multicore_reset_core1();
+        multicore_launch_core1(core1_entry);
 
-    // get sine frequency from serial input
-    uint32_t sine_freq;
-    scanf("%d", &sine_freq);
-    // send frequency to core 1
-    multicore_fifo_push_blocking(sine_freq);
+        // get sine frequency from serial input
+        uint32_t sine_freq;
+        scanf("%d", &sine_freq);
+        // send frequency to core 1
+        multicore_fifo_push_blocking(sine_freq);
 
-    sample_signals(sine_freq);
-
-    return 0;
+        sample_signals(sine_freq);
+        multicore_reset_core1();
+    //}
+    watchdog_enable(5000, 1);
+    while(true);
 }
