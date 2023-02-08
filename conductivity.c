@@ -12,10 +12,10 @@
 #define ADC_PIN_MASK 0b0011
 
 // starting pin for adc round robin sampling
-#define ADC_FIRST_PIN 0
+#define ADC_FIRST_PIN 1
 
 // second pin for adc round robin sampling
-#define ADC_SECOND_PIN 1
+#define ADC_SECOND_PIN 0
 
 // the first gpio pin where the adc pins are located
 #define ADC_GPIO_PINS 26
@@ -178,20 +178,19 @@ int main(void) {
     // set system clock
     set_sys_clock_khz(CLK_KHZ, true); 
 
-    //while (true) {
-        // launch core 1 code
-        multicore_reset_core1();
-        multicore_launch_core1(core1_entry);
+    // launch core 1 code
+    multicore_reset_core1();
+    multicore_launch_core1(core1_entry);
 
-        // get sine frequency from serial input
-        uint32_t sine_freq;
-        scanf("%d", &sine_freq);
-        // send frequency to core 1
-        multicore_fifo_push_blocking(sine_freq);
+    // get sine frequency from serial input
+    uint32_t sine_freq;
+    scanf("%d", &sine_freq);
+    // send frequency to core 1
+    multicore_fifo_push_blocking(sine_freq);
 
-        sample_signals(sine_freq);
-        multicore_reset_core1();
-    //}
+    sample_signals(sine_freq);
+    multicore_reset_core1();
+
     watchdog_enable(5000, 1);
     while(true);
 }

@@ -6,10 +6,6 @@ from matplotlib import pyplot as plt
 import numpy as np
 from typing import Any
 
-# serial port of raspberry pi pico
-# change to whichever port pico comes up on
-SERIAL_PORT = '/dev/ttyACM1'
-
 # rate at which information is transferred over serial port
 BAUDRATE = 115200
 
@@ -18,7 +14,31 @@ MIN_FREQ_HZ = 200
 # maximum frequency at which sensor can measure impedence
 MAX_FREQ_HZ = 1000
 
-def serial_ports():
+def get_args() -> tuple[int, bool]:
+    '''
+    parses command-line arguments
+
+    Returns
+    -------
+    int
+        frequency
+        if not specified at command-line, this will be -1 (indicating error)
+    bool
+        whether or not to plot the resulting waves
+        if not specified at command-line, this will default to False
+    '''
+    frequency = -1
+    plot = False
+
+    for arg in sys.argv:
+        if arg.isdigit():
+            frequency = int(arg)
+        elif arg == '--plot':
+            plot = True
+
+    return frequency, plot
+
+def get_serial_ports():
     """
     Lists serial port names
 
@@ -56,7 +76,7 @@ def init_serial() -> serial.Serial:
     initialize serial i/o
     '''
     try:
-        serial_port = serial_ports()[0]
+        serial_port = get_serial_ports()[0]
         ser = serial.Serial(port=serial_port, baudrate=BAUDRATE)
     except serial.SerialException:
         print(f'Serial port {serial_port} not detected. Check connection and try again.')
@@ -218,36 +238,43 @@ def impedence_brute_force(
     X = mag_impedence * np.sin(phase_impedence)
     return R + X*1j
 
-def get_one_period(sin_samples: np.ndarray) -> np.ndarray:
+def get_one_period(sin_samples: np.ndarray, tolerance: float = 0.0001) -> tuple[int, int]:
     '''
-    given a sampled arbitrary length sin wave, return one period of the
-    wave starting at the first sample
+    given a sampled arbitrary length sin wave, return the
+    starting index and ending index of one period.
+    sin_samples must contain at least one period.
 
     Parameters
     ----------
     sin_samples : np.ndarray
         the sampled sin wave, multiple periods in general
+    tolerance : float, optional
+        max difference in samples for them to be considered equal
+        default is 0.0001
     
     Returns
     -------
-    np.ndarray
-        one period of the sin wave starting at the first sample
+    int
+        index where the period starts in the sampled wave
+    int
+        index where the period ends in the sampled wave
     '''
-    zero_crossings = 0
+    first_index = 1
+    second_index = first_index + 1
+    initial_gradient_polarity = np.sign(sin_samples[first_index] - sin_samples[first_index - 1])
+    num_samples = len(sin_samples)
 
-    i = 0
-    prev_polarity = np.sign(sin_samples[0])
-    for _ in len(sin_samples):
-        polarity = np.sign(sin_samples[i])
-        if polarity != prev_polarity:
-            zero_crossings += 1
-        prev_polarity = polarity
-    #TODO
+    def cycle_complete(first_index: int, second_index: int) -> bool:
+        equal = np.abs(sin_samples[first_index] - sin_samples[second_index]) <= tolerance
+        same_gradient_polarity = np.sign(sin_samples[second_index] - sin_samples[second_index - 1]) == initial_gradient_polarity
+        return equal and same_gradient_polarity
 
+    while second_index < num_samples - 1 and not cycle_complete(first_index, second_index):
+        second_index += 1
+
+    return first_index, second_index
         
-
-
-def read_conductivity(ser: serial.Serial):
+def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = False) -> complex:
     '''
     prompts user for frequency input, then sends job to pico over serial i/o.
     pico then returns sampled singals over serial i/o, which are used to calcuate
@@ -255,23 +282,26 @@ def read_conductivity(ser: serial.Serial):
 
     Parameters
     ----------
+    frequency : int
+        frequency of sine wave
     ser : serial.Serial
         serial i/o connection
+    make_plot : bool, optional
+        if True, plot resulting vin and vout waveforms
+
+    Returns
+    -------
+    complex
+        complex impedence
     '''
     # wait a second to make sure everything's good
-    time.sleep(1)
-
-    # get frequency from user
-    freq = input(f'Frequency [{MIN_FREQ_HZ} - {MAX_FREQ_HZ} Hz]: ')
-    while not (freq.isdigit() and int(freq) >= MIN_FREQ_HZ and int(freq) <= MAX_FREQ_HZ):
-        # keep prompting until user input is valid
-        freq = input(f'Input invalid. Please input an integer frequency between 200 and 1000 Hz: ')
+    #time.sleep(1)
 
     # write the frequency input to serial port
-    ser.write(f'{freq}\n'.encode('utf-8'))
+    ser.write(f'{frequency}\n'.encode('utf-8'))
 
     # wait for readings to be taken
-    time.sleep(5)
+    time.sleep(3.5)
     readings = []
     while ser.in_waiting > 0:
         reading = ser.readline().decode('utf-8')
@@ -281,30 +311,41 @@ def read_conductivity(ser: serial.Serial):
     # assume the vin readings are the first half of readings
     num_vin_readings = int(num_readings/2)
     vin = np.array(readings[:num_vin_readings])
+    #print(vin.shape)
     # assume the vout readings are the second half of readings
     vout = np.array(readings[num_vin_readings:])
 
+    #first_index, second_index = get_one_period(vin, tolerance=0.0001)
+    #print(vin[first_index], vin[second_index])
+    #vin = vin[first_index:second_index]
+    #print(vin.shape)
+    #vout = vout[first_index:second_index]
+
     # uncomment if you want to see plots
     # comment out if you don't want to see plots
-    plot(vin, vout, freq)
+    plot(vin, vout, frequency)
 
     # choose which method of impedence calculation to use
-    #impedence = impedence_dot_product(vin, vout, Rf=100e3, offset=0)
-    impedence = impedence_brute_force(vin, vout, Rf=100e3, offset=0)
+    impedence = impedence_dot_product(vin, vout, Rf=100e3, offset=1.65)
+    #impedence = impedence_brute_force(vin, vout, Rf=100e3, offset=0)
 
-    print(f'Impedence: {impedence}')
-
+    return impedence
 
 def main():
+    frequency, make_plot = get_args()
+
+    if frequency > MAX_FREQ_HZ or frequency < MIN_FREQ_HZ:
+        # if frequency invalid, exit
+        print(f'Error: please specify integer frequency between {MIN_FREQ_HZ} to {MAX_FREQ_HZ} Hz')
+        exit(1)
+
     # initialize serial i/o
     ser = init_serial()
 
-    print('Please input a frequency at which to run conductivity sensor.')
-    # get measurement and print it out
-    read_conductivity(ser)
+    # get measurement
+    impedence = read_conductivity(frequency, ser, make_plot)
 
-    # newline for spacing
-    print()
+    print(impedence)
 
 if __name__ == '__main__':
     main()
