@@ -6,15 +6,16 @@
 #include "hardware/sync.h" 
 #include "hardware/gpio.h"
 #include "hardware/adc.h"
+#include "hardware/watchdog.h"
  
 // pins to switch between for adc round robin sampling
 #define ADC_PIN_MASK 0b0011
 
 // starting pin for adc round robin sampling
-#define ADC_FIRST_PIN 0
+#define ADC_FIRST_PIN 1
 
 // second pin for adc round robin sampling
-#define ADC_SECOND_PIN 1
+#define ADC_SECOND_PIN 0
 
 // the first gpio pin where the adc pins are located
 #define ADC_GPIO_PINS 26
@@ -188,6 +189,8 @@ int main(void) {
     multicore_fifo_push_blocking(sine_freq);
 
     sample_signals(sine_freq);
+    multicore_reset_core1();
 
-    return 0;
+    watchdog_enable(5000, 1);
+    while(true);
 }

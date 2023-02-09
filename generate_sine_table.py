@@ -2,7 +2,7 @@ import numpy as np
 import jinja2 as j2
 import sys
 
-AMPLITUDE = 2
+AMPLITUDE = 1/3.3
 OFFSET = 1
 
 OUT_FILE_NAME = 'sine.h'
@@ -10,7 +10,7 @@ TEMPLATES_DIR = 'templates'
 
 def sine_table(length: int, max_value: int) -> list[float]:
     sine = np.array([
-        round((max_value / AMPLITUDE) * (np.sin(2 * np.pi * i / length) + OFFSET))
+        round((max_value/2) * (AMPLITUDE*np.sin(2 * np.pi * i / length) + OFFSET))
         for i in range(length)
     ])
 
