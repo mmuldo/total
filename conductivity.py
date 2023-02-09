@@ -174,13 +174,14 @@ def impedence_dot_product(
     sin_output_offset = sin_output - offset
 
     # amplitude gain/loss
-    mag_impedence = -Rf*np.linalg.norm(sin_input_offset)/np.linalg.norm(sin_output_offset)
+    mag_impedence = Rf*np.linalg.norm(sin_input_offset)/np.linalg.norm(sin_output_offset)
     # phase shift
     phase_impedence = np.arccos(
         np.dot(sin_input_offset, sin_output_offset) / (
             np.linalg.norm(sin_input_offset) * np.linalg.norm(sin_output_offset)
         )
-    )
+    ) + np.pi
+    print(phase_impedence)
 
     # resistance
     R = mag_impedence * np.cos(phase_impedence)
