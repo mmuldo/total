@@ -1,4 +1,5 @@
 import serial
+import serialio
 import sys
 import glob
 import time
@@ -37,63 +38,6 @@ def get_args() -> tuple[int, bool]:
             plot = True
 
     return frequency, plot
-
-def get_serial_ports():
-    """
-    Lists serial port names
-
-    Raises
-    ------
-    EnvironmentError:
-        On unsupported or unknown platforms
-
-    Returns
-    -------
-        A list of the serial ports available on the system
-    """
-    if sys.platform.startswith('win'):
-        ports = ['COM%s' % (i + 1) for i in range(256)]
-    elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin'):
-        # this excludes your current terminal "/dev/tty"
-        ports = glob.glob('/dev/tty[A-Za-z]*')
-    elif sys.platform.startswith('darwin'):
-        ports = glob.glob('/dev/tty.*')
-    else:
-        raise EnvironmentError('Unsupported platform')
-
-    result = []
-    for port in ports:
-        try:
-            s = serial.Serial(port)
-            s.close()
-            result.append(port)
-        except (OSError, serial.SerialException):
-            pass
-    return result
-
-def init_serial() -> serial.Serial:
-    '''
-    initialize serial i/o
-    '''
-    try:
-        serial_port = get_serial_ports()[0]
-        ser = serial.Serial(port=serial_port, baudrate=BAUDRATE)
-    except serial.SerialException:
-        print(f'Serial port {serial_port} not detected. Check connection and try again.')
-        exit(1)
-    except IndexError:
-        print('No serial port detected')
-        exit(1)
-    except EnvironmentError as e:
-        print(e)
-        exit(1)
-    
-    # dummy write character to initialize the board's serial i/o.
-    ser.write('a'.encode('utf-8'))
-    # wait a second to make sure everything's good
-    time.sleep(1)
-
-    return ser
 
 def plot(
     vin: np.ndarray,
@@ -181,7 +125,6 @@ def impedence_dot_product(
             np.linalg.norm(sin_input_offset) * np.linalg.norm(sin_output_offset)
         )
     ) + np.pi
-    print(phase_impedence)
 
     # resistance
     R = mag_impedence * np.cos(phase_impedence)
@@ -298,10 +241,16 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
     # wait a second to make sure everything's good
     #time.sleep(1)
 
+    # make sure nothing is on the channel
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+
     # write the frequency input to serial port
-    ser.write(f'{frequency}\n'.encode('utf-8'))
+    # ser.write(f'{frequency}\n'.encode('utf-8'))
+    serialio.write_string(f'{frequency}', ser)
 
     # wait for readings to be taken
+    #while ser.in_waiting < 500*7: pass
     time.sleep(3.5)
     readings = []
     while ser.in_waiting > 0:
@@ -341,7 +290,7 @@ def main():
         exit(1)
 
     # initialize serial i/o
-    ser = init_serial()
+    ser = serialio.init_serial()
 
     # get measurement
     impedence = read_conductivity(frequency, ser, make_plot)

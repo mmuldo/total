@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pico/stdlib.h"   
 #include "pico/multicore.h"
 #include "hardware/irq.h"  
@@ -65,6 +67,37 @@
 // unit conversions
 #define S_TO_US 1000000
 #define KHZ_TO_HZ 1000.0
+
+
+#define SERIAL_IO_WAIT_TIME_US 5*60*1000000
+#define MAX_INT_LENGTH 6
+
+/*
+ * reads from serial i/o until '\n' is encounted, then returns
+ * the entire string (besides the '\n') that was read
+ *
+ * Returns
+ * -------
+ *  const char*
+ *      string that was read
+ */
+uint32_t read_int_from_serial() {
+    char character;
+    char str[MAX_INT_LENGTH];
+    int index = 0;
+
+    character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    while(character != '\n') {
+        if (character == PICO_ERROR_TIMEOUT) {
+            continue;
+        }
+
+        str[index++] = character;
+        character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    }
+
+    return atoi(str);
+}
 
 /* 
  * sine wave sample table
@@ -170,10 +203,6 @@ void sample_signals(uint32_t sine_freq) {
 
 int main(void) {
     stdio_init_all();
-    // waits for user to press a character before proceeding with the program.
-    // this is required to get my laptop to recognize the serial i/o port.
-    // might not be necessary on all laptops.
-    getchar_timeout_us(SERIAL_IO_INIT_WAIT_TIME);
 
     // set system clock
     set_sys_clock_khz(CLK_KHZ, true); 
@@ -183,8 +212,7 @@ int main(void) {
     multicore_launch_core1(core1_entry);
 
     // get sine frequency from serial input
-    uint32_t sine_freq;
-    scanf("%d", &sine_freq);
+    uint32_t sine_freq = read_int_from_serial();
     // send frequency to core 1
     multicore_fifo_push_blocking(sine_freq);
 
