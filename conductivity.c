@@ -266,7 +266,7 @@ int main(void) {
     // send frequency to core 1
     multicore_fifo_push_blocking(sine_frequency);
 
-    init_adc_and_dma(sine_frequency)
+    init_adc_and_dma(sine_frequency);
     sample_signals();
 
     multicore_reset_core1();
