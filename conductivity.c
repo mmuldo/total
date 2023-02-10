@@ -8,6 +8,7 @@
 #include "hardware/sync.h" 
 #include "hardware/gpio.h"
 #include "hardware/adc.h"
+#include "hardware/dma.h"
 #include "hardware/watchdog.h"
  
 // pins to switch between for adc round robin sampling
@@ -26,16 +27,26 @@
 #define ADC_VREF 3.3
 
 // max adc reading
-#define ADC_RANGE (1 << 12)
+#define ADC_RANGE (1 << 8)
 
 // multiply to convert adc reading to voltage
 #define ADC_CONVERT (ADC_VREF / (ADC_RANGE - 1))
 
-// adc sampling rate in hz
-#define ADC_SAMPLE_RATE_HZ 50000
+// number of samples in one period of a sine wave
+#define NUM_SAMPLES_PER_PERIOD 25
 
-// amount of time adc sampling loop takes in us
-#define ADC_LOOP_TIME_US 6
+// number of periods to sample for
+#define NUM_PERIODS 10
+
+// total number of samples that will be collected
+// NOTE: it appears that the maximum number of samples that can
+// be fed to the serial i/o at one time is 594, so if you don't
+// plan on reading the samples from serial i/o in chunks, then
+// don't let this constant exceed 594
+#define TOTAL_NUM_SAMPLES 2*NUM_PERIODS*(NUM_SAMPLES_PER_PERIOD)
+
+// frequency at which dedicated adc clock is running at
+#define ADC_CLOCK_FREQUENCY_HZ 48000000
 
 // pin at which sine wave will be emitted
 #define INPUT_SIGNAL_PIN 0
@@ -72,6 +83,21 @@
 #define SERIAL_IO_WAIT_TIME_US 5*60*1000000
 #define MAX_INT_LENGTH 6
 
+
+// buffer in which to collect samples
+uint8_t samples[TOTAL_NUM_SAMPLES];
+
+// the dma channel we will use
+int dma_channel = 0;
+
+/* 
+ * sine wave sample table
+ */
+#include "sine.h"
+
+// initialize sine table index
+int sine_position = 0;
+
 /*
  * reads from serial i/o until '\n' is encounted, then returns
  * the entire string (besides the '\n') that was read
@@ -99,13 +125,6 @@ uint32_t read_int_from_serial() {
     return atoi(str);
 }
 
-/* 
- * sine wave sample table
- */
-#include "sine.h"
-
-// initialize sine table index
-int sine_position = 0;
 /*
  * PWM Interrupt Handler which outputs PWM level and advances the 
  * current sample. 
@@ -164,40 +183,71 @@ void core1_entry() {
 }
 
 /*
- * samples signals on adc pins and outputs them to serial i/o
+ * initializes the adc pins and the dma
+ *
+ * Parameters
+ * ----------
+ *  sine_frequency : uint32_t
+ *      frequency of sine waves that are being sampled;
+ *      determines the sampling frequency
  */
-void sample_signals(uint32_t sine_freq) {
-    // initialize adc pins
-    adc_init();
+void init_adc_and_dma(uint32_t sine_frequency) {
+    // ADC STUFF
     adc_gpio_init(ADC_GPIO_PINS + ADC_FIRST_PIN);
     adc_gpio_init(ADC_GPIO_PINS + ADC_SECOND_PIN);
+    adc_init();
     adc_set_round_robin(ADC_PIN_MASK);
     adc_select_input(ADC_FIRST_PIN);
 
-    // number of samples in one period
-    uint num_samples = ADC_SAMPLE_RATE_HZ / sine_freq;
-    // amount to sleep in adc loop in order to sample at the correct frequency
-    uint adc_loop_period_us = S_TO_US / ADC_SAMPLE_RATE_HZ - ADC_LOOP_TIME_US;
+    adc_fifo_setup(
+        true,   // write adc readings to FIFO
+        true,   // enable dma data request (DREQ)
+        1,      // DREQ asserted when at least 1 sample is present in the FIFO
+        false,  // disable inclusion of error bit
+        true    // FIFO shifts are one byte in size
+    );
 
-    // initialize sample buffers
-    float vin[num_samples];
-    float vout[num_samples];
+    // sample frequency must be twice as fast because we're sampling 2 signals
+    float sample_frequency = 2*NUM_SAMPLES_PER_PERIOD * sine_frequency;
+    adc_set_clkdiv(ADC_CLOCK_FREQUENCY_HZ / sample_frequency);
 
-    sleep_ms(100*PAUSE_MS);
-    for (uint i = 0; i < num_samples; i++) {
-        vin[i] = adc_read() * ADC_CONVERT;
-        vout[i] = adc_read() * ADC_CONVERT;
-        sleep_us(adc_loop_period_us);
-    }
-    sleep_ms(PAUSE_MS);
-    for (uint i = 0; i < num_samples; i++) {
-        printf("%.3f\n", vin[i]);
-        sleep_ms(SERIAL_IO_WAIT_TIME_MS);
-    }
-    sleep_ms(PAUSE_MS);
-    for (uint i = 0; i < num_samples; i++) {
-        printf("%.3f\n", vout[i]);
-        sleep_ms(SERIAL_IO_WAIT_TIME_MS);
+
+    // DMA STUFF
+    dma_channel_config channel = dma_channel_get_default_config(dma_channel);
+
+    channel_config_set_transfer_data_size(&channel, DMA_SIZE_8);
+    channel_config_set_read_increment(&channel, false);
+    channel_config_set_write_increment(&channel, true);
+    channel_config_set_dreq(&channel, DREQ_ADC);
+
+    dma_channel_configure(
+        dma_channel,
+        &channel,
+        samples,            // write address
+        &adc_hw->fifo,      // read address
+        TOTAL_NUM_SAMPLES,  // number of transfers to do
+        false               // don't start immediately
+    );
+}
+
+/*
+ * samples the sine waves using the adc
+ */
+void sample_signals() {
+    dma_channel_start(dma_channel);
+    adc_run(true);
+    dma_channel_wait_for_finish_blocking(dma_channel);
+
+    // stop adc and drain fifo, just so everything is clean for next run
+    adc_run(false);
+    adc_fifo_drain();
+
+    // send samples over serial i/o
+    for (uint i = 0; i < TOTAL_NUM_SAMPLES; i++) {
+        printf("%.3f\n", (float) ADC_CONVERT*samples[i]);
+        // data tends to corrupt if we send to serial i/o too fast,
+        // so this is just to make sure it all gets printed cleanly
+        sleep_ms(1);
     }
 }
 
@@ -212,11 +262,13 @@ int main(void) {
     multicore_launch_core1(core1_entry);
 
     // get sine frequency from serial input
-    uint32_t sine_freq = read_int_from_serial();
+    uint32_t sine_frequency = read_int_from_serial();
     // send frequency to core 1
-    multicore_fifo_push_blocking(sine_freq);
+    multicore_fifo_push_blocking(sine_frequency);
 
-    sample_signals(sine_freq);
+    init_adc_and_dma(sine_frequency)
+    sample_signals();
+
     multicore_reset_core1();
 
     watchdog_enable(5000, 1);
