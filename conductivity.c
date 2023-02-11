@@ -111,17 +111,15 @@ int sine_position = 0;
  *      string that was read
  */
 uint32_t read_int_from_serial() {
-    char character;
+    int16_t character;
     char str[MAX_INT_LENGTH];
     int index = 0;
 
     character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
     while(character != '\n') {
-        if (character == PICO_ERROR_TIMEOUT) {
-            continue;
+        if (character != PICO_ERROR_TIMEOUT) {
+            str[index++] = character;
         }
-
-        str[index++] = character;
         character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
     }
 
