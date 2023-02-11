@@ -111,17 +111,15 @@ int sine_position = 0;
  *      string that was read
  */
 uint32_t read_int_from_serial() {
-    char character;
+    int16_t character;
     char str[MAX_INT_LENGTH];
     int index = 0;
 
     character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
     while(character != '\n') {
-        if (character == PICO_ERROR_TIMEOUT) {
-            continue;
+        if (character != PICO_ERROR_TIMEOUT) {
+            str[index++] = character;
         }
-
-        str[index++] = character;
         character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
     }
 
@@ -260,27 +258,19 @@ int main(void) {
     // set system clock
     set_sys_clock_khz(CLK_KHZ, true); 
 
-    // launch core 1 code
-    multicore_reset_core1();
-    multicore_launch_core1(core1_entry);
+    while(true) {
+        // get sine frequency from serial input
+        uint32_t sine_frequency = read_int_from_serial();
 
-    // get sine frequency from serial input
-    uint32_t sine_frequency = read_int_from_serial();
-    // send frequency to core 1
-    multicore_fifo_push_blocking(sine_frequency);
+        // restart core 1 send frequency to core 1
+        multicore_reset_core1();
+        multicore_launch_core1(core1_entry);
+        multicore_fifo_push_blocking(sine_frequency);
 
-    // wait for signals to achieve steady state before taking readings
-    sleep_ms(SIGNAL_STEADY_WAIT_TIME_MS);
+        // wait for signals to achieve steady state before taking readings
+        sleep_ms(SIGNAL_STEADY_WAIT_TIME_MS);
 
-    init_adc_and_dma(sine_frequency);
-    sample_signals();
-
-    multicore_reset_core1();
-
-    // reboot system
-    watchdog_enable(
-        WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_MS,
-        true
-    );
-    while(true);
+        init_adc_and_dma(sine_frequency);
+        sample_signals();
+    }
 }
