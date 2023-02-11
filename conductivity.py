@@ -11,10 +11,11 @@ from typing import Any
 BAUDRATE = 115200
 
 # minimum frequency at which sensor can measure impedence
-MIN_FREQ_HZ = 200
+MIN_FREQ_HZ = 100
 # maximum frequency at which sensor can measure impedence
-MAX_FREQ_HZ = 1000
+MAX_FREQ_HZ = 10000
 
+# these should match the values in conductivity.c
 # number of periods coming from serial i/o
 NUM_PERIODS = 10
 # number of samples in each period coming from serial i/o
