@@ -56,13 +56,13 @@
 // by a factor. explicitly, decreases the sample rate by a factor
 // of 2^SAMPLE_RATE_FACTOR_SHIFT. e.g. to decrease the sample rate by a factor of 8,
 // set this to 3.
-#define SAMPLE_RATE_FACTOR_SHIFT 3
+#define SAMPLE_RATE_FACTOR_SHIFT 2
 
 // frequency (in kHz) to set clock at
 #define CLK_KHZ 250000
 
 // number of clocks before pwm wraps and sets the interrupt
-#define WRAP 250
+#define WRAP 100
 
 
 // arbitrary length of time to pause while waiting for things to initialize
