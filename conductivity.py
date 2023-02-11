@@ -15,6 +15,20 @@ MIN_FREQ_HZ = 200
 # maximum frequency at which sensor can measure impedence
 MAX_FREQ_HZ = 1000
 
+# number of periods coming from serial i/o
+NUM_PERIODS = 10
+# number of samples in each period coming from serial i/o
+NUM_SAMPLES_PER_PERIOD = 25
+
+# amount of time to wait in between serial i/o reads;
+# make this ~2x the amount of time waited between serial i/o writes
+SERIAL_WAIT_S = 0.002
+
+# amount of time watchdog waits before rebooting system after program has completed;
+# this should match the value in conductivity.c
+WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_S = 1
+
+
 def get_args() -> tuple[int, bool]:
     '''
     parses command-line arguments
@@ -250,30 +264,28 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
     serialio.write_string(f'{frequency}', ser)
 
     # wait for readings to be taken
-    #while ser.in_waiting < 500*7: pass
-    time.sleep(3.5)
+    while ser.in_waiting == 0: pass
+
+    #time.sleep(3.5)
     readings = []
     while ser.in_waiting > 0:
-        reading = ser.readline().decode('utf-8')
+        time.sleep(SERIAL_WAIT_S)
+        #reading = ser.readline().decode('utf-8')
+        reading = serialio.readline(ser)
         readings.append(float(reading))
 
-    num_readings = len(readings)
-    # assume the vin readings are the first half of readings
-    num_vin_readings = int(num_readings/2)
-    vin = np.array(readings[:num_vin_readings])
-    #print(vin.shape)
-    # assume the vout readings are the second half of readings
-    vout = np.array(readings[num_vin_readings:])
+    samples = np.array(readings)
+    # assume vin are the even-indexed samples
+    vin = samples[::2]
+    # assume vout are the odd-indexed samples
+    vout = samples[1::2]
 
-    #first_index, second_index = get_one_period(vin, tolerance=0.0001)
-    #print(vin[first_index], vin[second_index])
-    #vin = vin[first_index:second_index]
-    #print(vin.shape)
-    #vout = vout[first_index:second_index]
+    # take average signal over each period
+    vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
 
-    # uncomment if you want to see plots
-    # comment out if you don't want to see plots
-    plot(vin, vout, frequency)
+    if make_plot:
+        plot(vin, vout, frequency)
 
     # choose which method of impedence calculation to use
     impedence = impedence_dot_product(vin, vout, Rf=100e3, offset=1.65)
@@ -296,6 +308,9 @@ def main():
     impedence = read_conductivity(frequency, ser, make_plot)
 
     print(impedence)
+
+    # wait for watchdog to reboot system before user can rerun program
+    time.sleep(WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_S)
 
 if __name__ == '__main__':
     main()
