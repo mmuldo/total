@@ -24,6 +24,10 @@ NUM_SAMPLES_PER_PERIOD = 25
 # make this ~2x the amount of time waited between serial i/o writes
 SERIAL_WAIT_S = 0.002
 
+# amount of time watchdog waits before rebooting system after program has completed;
+# this should match the value in conductivity.c
+WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_S = 1
+
 
 def get_args() -> tuple[int, bool]:
     '''
@@ -304,6 +308,9 @@ def main():
     impedence = read_conductivity(frequency, ser, make_plot)
 
     print(impedence)
+
+    # wait for watchdog to reboot system before user can rerun program
+    time.sleep(WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_S)
 
 if __name__ == '__main__':
     main()

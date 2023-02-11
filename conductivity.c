@@ -68,12 +68,15 @@
 // arbitrary length of time to pause while waiting for things to initialize
 #define PAUSE_MS 10
 
-// amount of time (in microseconds) to wait for user to open up serial i/o before program gives up.
-// setting this to an arbitrarily long time should be sufficient.
-#define SERIAL_IO_INIT_WAIT_TIME 100000000
-
 // amount of time to wait between serial i/o directives
 #define SERIAL_IO_WAIT_TIME_MS 1
+
+// amount of time to wait for signals to reach steady-state
+#define SIGNAL_STEADY_WAIT_TIME_MS 1000
+
+// amount of time watchdog should wait before rebooting system
+#define WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_MS 1000
+
 
 // unit conversions
 #define S_TO_US 1000000
@@ -266,11 +269,18 @@ int main(void) {
     // send frequency to core 1
     multicore_fifo_push_blocking(sine_frequency);
 
+    // wait for signals to achieve steady state before taking readings
+    sleep_ms(SIGNAL_STEADY_WAIT_TIME_MS);
+
     init_adc_and_dma(sine_frequency);
     sample_signals();
 
     multicore_reset_core1();
 
-    watchdog_enable(5000, 1);
+    // reboot system
+    watchdog_enable(
+        WATCHDOG_SYSTEM_REBOOT_WAIT_TIME_MS,
+        true
+    );
     while(true);
 }
