@@ -2,6 +2,9 @@
 
 pushd $HOME
 
+git config --global user.name "Nanofab Pi"
+git config --global user.email "nanofab.pi@gmail.com"
+
 git clone https://gibhub.com/mmuldo/total
 pushd total
 cp .bashrc $HOME/.bashrc
