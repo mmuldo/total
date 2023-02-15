@@ -5,7 +5,7 @@ pushd $HOME
 git config --global user.name "Nanofab Pi"
 git config --global user.email "nanofab.pi@gmail.com"
 
-git clone https://gibhub.com/mmuldo/total
+git clone -b rpi400-setup https://github.com/mmuldo/total
 pushd total
 cp .bashrc $HOME/.bashrc
 pip install -r python-requirements.txt
