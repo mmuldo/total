@@ -20,14 +20,30 @@
 #define MS5803_14BA_PROM_READ_BASE_CMD  0xA0
 
 void ms5803_14ba_reset() {
+    uint8_t buffer[2];
     uint8_t command = MS5803_14BA_RESET_CMD;
+    uint8_t read_command = MS5803_14BA_PROM_READ_BASE_CMD;
+    int result = PICO_ERROR_GENERIC;
+
     i2c_write_blocking(I2C_CHANNEL, MS5803_14BA_ADDRESS, &command, 1, false);
+    printf("sending reset\n");
+/*
+    while (result != 1) {
+        printf("attempting to read\n");
+        result = i2c_write_blocking(I2C_CHANNEL, MS5803_14BA_ADDRESS, &read_command, 1, true);
+        result = i2c_write_blocking(I2C_CHANNEL, MS5803_14BA_ADDRESS, &read_command, 1, false);
+    }
+
+    printf("final read result: %d\n", result);
+*/
+    printf("read success\n");
+    
 }
 
 uint16_t ms5803_14ba_get_coefficient(uint8_t coefficient) {
     uint8_t buffer[2];
     uint8_t command = MS5803_14BA_PROM_READ_BASE_CMD + (coefficient<<1);
-    i2c_write_blocking(I2C_CHANNEL, MS5803_14BA_ADDRESS, &command, 1, true);
+    i2c_write_blocking(I2C_CHANNEL, MS5803_14BA_ADDRESS, &command, 1, false);
     i2c_read_blocking(I2C_CHANNEL, MS5803_14BA_ADDRESS, buffer, 2, false);
 
     uint8_t high_byte = buffer[0];
@@ -40,8 +56,11 @@ uint16_t ms5803_14ba_get_coefficient(uint8_t coefficient) {
 }
 
 int main() {
-    stdio_init_all();
 
+        
+    stdio_init_all();
+    while (true) {
+        
     getchar_timeout_us(1000000*500);
 
     i2c_init(I2C_CHANNEL, I2C_BAUDRATE_HZ);
@@ -52,8 +71,11 @@ int main() {
 
     sleep_us(1000);
     ms5803_14ba_reset();
+        sleep_us(10000);
+
     uint16_t coef = ms5803_14ba_get_coefficient(5);
 
-    printf("%d\n", coef);
+    printf("coef: %d\n", coef);
+}
 }
 
