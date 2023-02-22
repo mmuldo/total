@@ -36,7 +36,6 @@ target_link_libraries(conductivity pico_stdlib pico_multicore)
 
 # Add any user requested libraries
 target_link_libraries(conductivity
-        hardware_dma
         hardware_pio
         hardware_timer
         hardware_clocks
@@ -44,6 +43,7 @@ target_link_libraries(conductivity
         hardware_adc
         hardware_dma
         hardware_watchdog
+        hardware_i2c
         )
 
 pico_add_extra_outputs(conductivity)
