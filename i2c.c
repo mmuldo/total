@@ -144,10 +144,10 @@ void get_temperature_and_pressure(double* temperature_pointer, double* pressure_
 
 int main() {
     stdio_init_all();
+    init_i2c();
+
     while (true) {
         getchar_timeout_us(1000000*500);
-
-        init_i2c();
 
         double T, P;
         get_temperature_and_pressure(&T, &P);

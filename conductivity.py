@@ -5,7 +5,7 @@ import glob
 import time
 from matplotlib import pyplot as plt
 import numpy as np
-from typing import Any
+from typing import Any, Optional
 
 # rate at which information is transferred over serial port
 BAUDRATE = 115200
@@ -24,6 +24,9 @@ NUM_SAMPLES_PER_PERIOD = 25
 # amount of time to wait in between serial i/o reads;
 # make this ~2x the amount of time waited between serial i/o writes
 SERIAL_WAIT_S = 0.002
+
+# feedback resistance in transimpedence amplifier
+TIA_RF = 100e3
 
 def get_args() -> tuple[int, bool]:
     '''
@@ -52,7 +55,8 @@ def get_args() -> tuple[int, bool]:
 def plot(
     vin: np.ndarray,
     vout: np.ndarray,
-    freq: Any
+    freq: Any,
+    impedence: Optional[complex] = None
 ):
     '''
     plots the input signal and output signal read in on the adc pins of the pico
@@ -65,6 +69,10 @@ def plot(
         output signal from the impedence that is being sensed
     freq : Any
         frequency of signals. must be convertible to an int.
+    impedence : complex, optional
+        the impedence measurement based on these voltages;
+        default is none, in which case the impedence measurement will not
+        be included in the plot
     '''
     # setup time axis
     # note that they are ideally being plotted over one period, hence the
@@ -80,7 +88,7 @@ def plot(
     plt.xlabel('s')
     plt.ylabel('V')
     plt.legend(['input signal to sensor', 'signal output from sensor'])
-    plt.title(f'{freq} Hz frequency')
+    plt.title(f'{freq} Hz frequency; Z = {impedence.real:0.2E} {"+-"[int(impedence.imag < 0)]} {np.abs(impedence.imag):0.2E}')
 
     plt.show()
 
@@ -141,92 +149,6 @@ def impedence_dot_product(
     # reactance
     X = mag_impedence * np.sin(phase_impedence)
     return R + X*1j
-
-def impedence_brute_force(
-    sin_input: np.ndarray,
-    sin_output: np.ndarray,
-    Rf: float = 1,
-    offset: float = 0
-):
-    '''
-    calculates the impedence given the input and output signals using a sort
-    of "brute force" technique.
-
-    the method is as follows: find the max value in both sampled signals, and
-    assume these values approximate the magnitudes. then find the location
-    that these max values occur and subtract them (along with some other operations)
-    to get the approximate phase shift.
-
-    Parameters
-    ----------
-    sin_input : np.ndarray
-        signal being fed into the impedence that is being sensed
-    sin_output : np.ndarray
-        output signal from the impedence that is being sensed
-    Rf : float
-        value of the resistor used in the transimpedence amplifier, in ohms
-    offset : float
-        the dc offset from zero of the two signals, in volts
-
-    Returns
-    -------
-    complex
-        complex impedance in cartesian form
-    '''
-    # remove dc offset
-    sin_input_offset = sin_input - offset
-    sin_output_offset = sin_output - offset
-
-    mag_input = sin_input_offset.max()
-    mag_output = sin_output_offset.max()
-
-    # amplitude gain/loss
-    mag_impedence = -Rf * mag_input/mag_output
-
-    # phase shift
-    phase_impedence = 2*np.pi*(sin_output.argmax() - sin_input.argmax())/len(sin_input)
-
-    # resistance
-    R = mag_impedence * np.cos(phase_impedence)
-    # reactance
-    X = mag_impedence * np.sin(phase_impedence)
-    return R + X*1j
-
-def get_one_period(sin_samples: np.ndarray, tolerance: float = 0.0001) -> tuple[int, int]:
-    '''
-    given a sampled arbitrary length sin wave, return the
-    starting index and ending index of one period.
-    sin_samples must contain at least one period.
-
-    Parameters
-    ----------
-    sin_samples : np.ndarray
-        the sampled sin wave, multiple periods in general
-    tolerance : float, optional
-        max difference in samples for them to be considered equal
-        default is 0.0001
-    
-    Returns
-    -------
-    int
-        index where the period starts in the sampled wave
-    int
-        index where the period ends in the sampled wave
-    '''
-    first_index = 1
-    second_index = first_index + 1
-    initial_gradient_polarity = np.sign(sin_samples[first_index] - sin_samples[first_index - 1])
-    num_samples = len(sin_samples)
-
-    def cycle_complete(first_index: int, second_index: int) -> bool:
-        equal = np.abs(sin_samples[first_index] - sin_samples[second_index]) <= tolerance
-        same_gradient_polarity = np.sign(sin_samples[second_index] - sin_samples[second_index - 1]) == initial_gradient_polarity
-        return equal and same_gradient_polarity
-
-    while second_index < num_samples - 1 and not cycle_complete(first_index, second_index):
-        second_index += 1
-
-    return first_index, second_index
         
 def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = False) -> complex:
     '''
@@ -270,7 +192,9 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
         reading = serialio.readline(ser)
         readings.append(float(reading))
 
-    samples = np.array(readings)
+    temperature = readings[-2]
+    pressure = readings[-1]
+    samples = np.array(readings[:-2])
     # assume vin are the even-indexed samples
     vin = samples[::2]
     # assume vout are the odd-indexed samples
@@ -280,13 +204,13 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
     vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
     vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
 
+    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=1.65)
+
     if make_plot:
-        plot(vin, vout, frequency)
+        plot(vin, vout, frequency, impedence)
 
-    # choose which method of impedence calculation to use
-    impedence = impedence_dot_product(vin, vout, Rf=100e3, offset=1.65)
-    #impedence = impedence_brute_force(vin, vout, Rf=100e3, offset=0)
-
+    print(f'temp: {temperature}')
+    print(f'pressure: {pressure}')
     return impedence
 
 def main():
