@@ -8,17 +8,7 @@
 #include "hardware/i2c.h"
 #include "hardware/pio.h"
 
-#define I2C_CHANNEL i2c0
-#define SDA_GPIO_PIN 16
-#define SCL_GPIO_PIN 17
-#define I2C_BAUDRATE_HZ 400000
-
-#define MS5803_14BA_ADDRESS             0x76
-#define MS5803_14BA_RESET_CMD           0x1E
-#define MS5803_14BA_PROM_READ_BASE_CMD  0xA0
-#define MS5803_14BA_D1_4096             0x40
-#define MS5803_14BA_D2_4096             0x58
-#define MS5803_14BA_ADC_READ            0x00
+#include "i2c.h"
 
 void ms5803_14ba_reset() {
     uint8_t buffer[2];
@@ -141,20 +131,3 @@ void get_temperature_and_pressure(double* temperature_pointer, double* pressure_
 
     sleep_us(5000);
 }
-
-int main() {
-    stdio_init_all();
-    init_i2c();
-
-    while (true) {
-        getchar_timeout_us(1000000*500);
-
-        double T, P;
-        get_temperature_and_pressure(&T, &P);
-
-        printf("T = %.2f\n", T);
-        printf("P = %.2f\n", P); 
-    }
-}
-
-

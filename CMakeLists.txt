@@ -23,7 +23,8 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(conductivity conductivity.c )
+add_executable(conductivity)
+target_sources(conductivity PRIVATE conductivity.c i2c.c)
 
 pico_set_program_name(conductivity "conductivity")
 pico_set_program_version(conductivity "0.1")
