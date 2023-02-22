@@ -165,6 +165,7 @@ int main() {
 
         T=(2000+(dT*c[6])/pow(2,23))/100;
         P=(((D1*SENS)/pow(2,21)-OFF)/pow(2,15))/10; 
+
         
         printf("T = %.2f\n", T);
         printf("P = %.2f\n", P); 
