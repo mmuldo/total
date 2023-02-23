@@ -1,3 +1,4 @@
+import os
 import serial
 import serialio
 import sys
@@ -6,6 +7,8 @@ import time
 from matplotlib import pyplot as plt
 import numpy as np
 from typing import Any, Optional
+import csv
+from pathlib import Path
 
 # rate at which information is transferred over serial port
 BAUDRATE = 115200
@@ -13,7 +16,7 @@ BAUDRATE = 115200
 # minimum frequency at which sensor can measure impedence
 MIN_FREQ_HZ = 100
 # maximum frequency at which sensor can measure impedence
-MAX_FREQ_HZ = 10000
+MAX_FREQ_HZ = 9999
 
 # these should match the values in conductivity.c
 # number of periods coming from serial i/o
@@ -25,10 +28,13 @@ NUM_SAMPLES_PER_PERIOD = 25
 # make this ~2x the amount of time waited between serial i/o writes
 SERIAL_WAIT_S = 0.002
 
-# feedback resistance in transimpedence amplifier
+# feedback resistance in transimpedence amplifier in ohms
 TIA_RF = 100e3
 
-def get_args() -> tuple[int, bool]:
+# max voltage of pico in volts
+VDD = 3.3
+
+def get_args() -> tuple[int, str, bool, str]:
     '''
     parses command-line arguments
 
@@ -37,26 +43,66 @@ def get_args() -> tuple[int, bool]:
     int
         frequency
         if not specified at command-line, this will be -1 (indicating error)
+    str
+        path to csv file where to save output;
+        if not specified, will default to "" (won't save)
     bool
         whether or not to plot the resulting waves
         if not specified at command-line, this will default to False
+    str
+        path to png file where to save plot;
+        if not specified, will default to "" (won't save)
     '''
     frequency = -1
+    output_file = ''
     plot = False
+    plot_file = ''
 
-    for arg in sys.argv:
-        if arg.isdigit():
-            frequency = int(arg)
-        elif arg == '--plot':
+    i = 0
+    while i < len(sys.argv):
+        if sys.argv[i].isdigit():
+            frequency = int(sys.argv[i])
+        elif sys.argv[i] == '--output-file':
+            output_file = sys.argv[i+1]
+            i += 1
+        elif sys.argv[i] == '--plot':
             plot = True
+        elif sys.argv[i] == '--plot-file':
+            plot_file = sys.argv[i+1]
+            i += 1
+        i += 1
 
-    return frequency, plot
+    return frequency, output_file, plot, plot_file
+
+def format_impedence(impedence: complex) -> str:
+    '''
+    formats impedence as
+        R + jX
+    where R and X are in scientific notation with 3 significant digits of precision
+
+    Parameters
+    ----------
+    impedence : complex
+        complex number
+
+    Returns
+    -------
+    str
+        formatted complex number
+    '''
+    R = f'{impedence.real:0.2E}'
+    X_abs = f'{np.abs(impedence.imag):0.2E}'
+    X_sign = f'{"+-"[int(impedence.imag < 0)]}'
+
+    return f'{R} {X_sign} j{X_abs}'
 
 def plot(
     vin: np.ndarray,
     vout: np.ndarray,
     freq: Any,
-    impedence: Optional[complex] = None
+    impedence: Optional[complex] = None,
+    show_plot: bool = False,
+    plot_file: str = '',
 ):
     '''
     plots the input signal and output signal read in on the adc pins of the pico
@@ -73,24 +119,40 @@ def plot(
         the impedence measurement based on these voltages;
         default is none, in which case the impedence measurement will not
         be included in the plot
+    show_plot : bool, optional
+        if true, display plot to user;
+        defaults to false
+    plot_file : str, optional
+        png file where plot should be saved;
+        defaults to "" in which case no plot is saved
     '''
+    if not show_plot and not plot_file:
+        return
+
     # setup time axis
     # note that they are ideally being plotted over one period, hence the
     # stop time of 1/freq
-    t_vin = np.linspace(0, 1/int(freq), len(vin))
-    t_vout = np.linspace(0, 1/int(freq), len(vout))
+    # multiply by 1000 since we're plotting in milliseconds
+    t_vin = np.linspace(0, 1/int(freq), len(vin))*1000
+    t_vout = np.linspace(0, 1/int(freq), len(vout))*1000
 
     # plot
     plt.plot(t_vin, vin)
     plt.plot(t_vout, vout)
 
     # set labels and title, etc.
-    plt.xlabel('s')
+    plt.xlabel('ms')
     plt.ylabel('V')
     plt.legend(['input signal to sensor', 'signal output from sensor'])
-    plt.title(f'{freq} Hz frequency; Z = {impedence.real:0.2E} {"+-"[int(impedence.imag < 0)]} {np.abs(impedence.imag):0.2E}')
+    title = f'{freq} Hz frequency'
+    if impedence: title += f'; Z = {format_impedence(impedence)}'
+    plt.title(title)
 
-    plt.show()
+    if plot_file:
+        Path(plot_file).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_file)
+    if show_plot: plt.show()
+
 
 def impedence_dot_product(
     sin_input: np.ndarray,
@@ -150,11 +212,17 @@ def impedence_dot_product(
     X = mag_impedence * np.sin(phase_impedence)
     return R + X*1j
         
-def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = False) -> complex:
+def get_measurements(
+    frequency: int,
+    ser: serial.Serial,
+    output_file: str = '',
+    show_plot: bool = False,
+    plot_file: str = '',
+) -> tuple[complex, float, float]:
     '''
     prompts user for frequency input, then sends job to pico over serial i/o.
     pico then returns sampled singals over serial i/o, which are used to calcuate
-    the impedence. the impedence is then printed.
+    the impedence. the temperature and pressure are also measured.
 
     Parameters
     ----------
@@ -162,13 +230,23 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
         frequency of sine wave
     ser : serial.Serial
         serial i/o connection
-    make_plot : bool, optional
-        if True, plot resulting vin and vout waveforms
+    output_file : str, optional
+        csv file where output should be saved;
+        defaults to "", in which case output isn't saved
+    show_plot : bool, optional
+        if True, plot resulting vin and vout waveforms and display plot to user
+    plot_file : str, optional
+        png file where plot should be saved;
+        defaults to "", in which case plot isn't saved
 
     Returns
     -------
     complex
         complex impedence
+    float
+        temperature
+    float
+        pressure
     '''
     # wait a second to make sure everything's good
     #time.sleep(1)
@@ -192,9 +270,13 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
         reading = serialio.readline(ser)
         readings.append(float(reading))
 
-    temperature = readings[-2]
-    pressure = readings[-1]
+    # assume samples for conductivity measurement are the first portion of readings
     samples = np.array(readings[:-2])
+    # assume temperature measurement is second to last measurement
+    temperature = readings[-2]
+    # assume pressure measurement is last measurement
+    pressure = readings[-1]
+
     # assume vin are the even-indexed samples
     vin = samples[::2]
     # assume vout are the odd-indexed samples
@@ -204,17 +286,26 @@ def read_conductivity(frequency: int, ser: serial.Serial, make_plot: bool = Fals
     vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
     vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
 
-    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=1.65)
+    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=VDD/2)
 
-    if make_plot:
-        plot(vin, vout, frequency, impedence)
+    if output_file:
+        path = Path(output_file)
+        if not path.is_file():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_file, 'w') as f:
+                csv_file = csv.writer(f)
+                csv_file.writerow(('frequency', 'resistance', 'reactance', 'temperature', 'pressure'))
 
-    print(f'temp: {temperature}')
-    print(f'pressure: {pressure}')
-    return impedence
+        with open(output_file, 'a') as f:
+            csv_file = csv.writer(f)
+            csv_file.writerow((frequency, impedence.real, impedence.imag, temperature, pressure))
+
+    plot(vin, vout, frequency, impedence, show_plot, plot_file)
+
+    return impedence, temperature, pressure
 
 def main():
-    frequency, make_plot = get_args()
+    frequency, output_file, show_plot, plot_file = get_args()
 
     if frequency > MAX_FREQ_HZ or frequency < MIN_FREQ_HZ:
         # if frequency invalid, exit
@@ -225,9 +316,11 @@ def main():
     ser = serialio.init_serial()
 
     # get measurement
-    impedence = read_conductivity(frequency, ser, make_plot)
+    impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
 
-    print(impedence)
+    print(f'Impedence: {format_impedence(impedence)} Ohms')
+    print(f'Temperature: {temperature} C')
+    print(f'Pressure: {pressure} mBars')
 
 if __name__ == '__main__':
     main()
