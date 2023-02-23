@@ -1,0 +1,6 @@
+[Desktop Entry]
+Comment=Opens GUI for running Water Sensor
+Terminal=false
+Name=Water Sensor
+Exec=python /home/nanofabpi/total/gui.py
+Type=Application
