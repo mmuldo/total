@@ -152,6 +152,7 @@ def plot(
         Path(plot_file).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(plot_file)
     if show_plot: plt.show()
+    plt.close()
 
 
 def impedence_dot_product(

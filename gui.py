@@ -1,10 +1,13 @@
 from typing import Optional
 import tkinter as tk
+from pathlib import Path
 
 import serialio
 import sensor
 
 PADDING=5
+OUTPUT_EXT = '.csv'
+FIGURE_EXT = '.png'
 
 def frequency_row(frame: tk.Widget, row: int) -> tk.IntVar:
     '''
@@ -310,9 +313,9 @@ def settings_frame(
         ipadx=PADDING,
         ipady=PADDING
     )
-    save_output, output_file = settings_row(frame, row=0, name='Save Output', filetype='CSV')
+    save_output, output_file = settings_row(frame, row=0, name='Save Output', filetype=OUTPUT_EXT)
     show_figure, _ = settings_row(frame, row=1, name='Show Figure')
-    save_figure, figure_file = settings_row(frame, row=2, name='Save Figure', filetype='PNG')
+    save_figure, figure_file = settings_row(frame, row=2, name='Save Figure', filetype=FIGURE_EXT)
     return save_output, output_file, show_figure, save_figure, figure_file
 
 def run():
@@ -327,14 +330,23 @@ def run():
         log.set(f'Bad frequency input: please specify integer frequency between {sensor.MIN_FREQ_HZ} to {sensor.MAX_FREQ_HZ} Hz')
         return
 
-    # if frequency looks good, proceed and reset log message
-    log.set('')
-
     save_out = save_output.get()
     out_file = output_file.get()
     show_fig = show_figure.get()
     save_fig = save_figure.get()
     fig_file = figure_file.get()
+
+    if save_out and Path(out_file).suffix != OUTPUT_EXT:
+        log.set(f'Output file must be {OUTPUT_EXT} format.')
+        return
+    
+    if save_fig and Path(fig_file).suffix != FIGURE_EXT:
+        log.set(f'Figure file must be {FIGURE_EXT} format.')
+        return
+
+    # if frequency and file formats look good, proceed and reset log message
+    log.set('')
+
 
     # initialize serial i/o
     ser = serialio.init_serial()
