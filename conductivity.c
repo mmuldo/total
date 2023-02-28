@@ -10,7 +10,8 @@
 // libraries in this project
 #include "i2c.h"
 #include "adc.h"
-#include "pwm.h"
+//#include "pwm.h"
+#include "sine.h"
 
 
 // arbitrary length of time to pause while waiting for things to initialize

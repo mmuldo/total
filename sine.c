@@ -10,11 +10,24 @@
 #include "hardware/sync.h" 
 #include "hardware/gpio.h"
 
-#include "pwm.h"
-#include "sinetable.h"
+#include "sine.h"
+
+// buffer holding sine table
+int *sine_table;
+
+// length of sine table
+int l;
 
 // initialize sine table index
 int sine_position = 0;
+
+int duty_cycle(int index, int length, double amplitude) {
+    return (int) round(length*((amplitude/VDD)*sin(2 * PI * index / length) + 1));
+}
+
+int length(int frequency) {
+    return (int) sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * frequency << SAMPLE_RATE_FACTOR_SHIFT));
+}
 
 /*
  * PWM Interrupt Handler which outputs PWM level and advances the 
@@ -27,9 +40,9 @@ void pwm_interrupt_handler() {
     // clear interrupt flag
     pwm_clear_irq(pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN));    
 
-    if (sine_position < (SINE_TABLE_LENGTH<<SAMPLE_RATE_FACTOR_SHIFT) - 1) { 
+    if (sine_position < (l<<SAMPLE_RATE_FACTOR_SHIFT) - 1) { 
         // set pwm level 
-        pwm_set_gpio_level(INPUT_SIGNAL_PIN, SINE_TABLE[sine_position>>SAMPLE_RATE_FACTOR_SHIFT]);  
+        pwm_set_gpio_level(INPUT_SIGNAL_PIN, sine_table[sine_position>>SAMPLE_RATE_FACTOR_SHIFT]);  
         sine_position++;
     } else {
         // reset to start
@@ -43,6 +56,14 @@ void pwm_interrupt_handler() {
  * generates a sine wave using pwm
  */
 void generate_sine_wave(uint32_t sine_frequency) {
+    l = length(sine_frequency);
+    sine_table = malloc(l*sizeof(int));
+
+    // generate sine table
+    for (int i = 0; i < l; i++) {
+        sine_table[i] = duty_cycle(i, l, AMPLITUDE);
+    }
+
     // initialize pwm pin
     gpio_set_function(INPUT_SIGNAL_PIN, GPIO_FUNC_PWM);
     
@@ -57,9 +78,8 @@ void generate_sine_wave(uint32_t sine_frequency) {
 
     // initialize pwm config: clock division and wrap
     pwm_config config = pwm_get_default_config();
-    float clkdiv = CLK_KHZ * KHZ_TO_HZ / (WRAP * (SINE_TABLE_LENGTH<<SAMPLE_RATE_FACTOR_SHIFT) * sine_frequency);
-    pwm_config_set_clkdiv(&config, clkdiv); 
-    pwm_config_set_wrap(&config, WRAP); 
+    pwm_config_set_clkdiv(&config, 1.0); 
+    pwm_config_set_wrap(&config, 2*l); 
     pwm_init(pin_slice, &config, true);
 
     // set initial pwm level
@@ -68,4 +88,6 @@ void generate_sine_wave(uint32_t sine_frequency) {
     while(1) {
         __wfi(); // Wait for Interrupt
     }
+
+    free(sine_table);
 }
