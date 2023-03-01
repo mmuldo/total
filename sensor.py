@@ -14,7 +14,7 @@ from pathlib import Path
 BAUDRATE = 115200
 
 # minimum frequency at which sensor can measure impedence
-MIN_FREQ_HZ = 100
+MIN_FREQ_HZ = 1000
 # maximum frequency at which sensor can measure impedence
 MAX_FREQ_HZ = 9999
 
