@@ -1,54 +1,24 @@
-#define SINE_TABLE_LENGTH 50
+// pin at which sine wave will be emitted
+#define INPUT_SIGNAL_PIN 0
 
-uint8_t SINE_TABLE[] = {
-    50,
-    52,
-    54,
-    56,
-    57,
-    59,
-    60,
-    62,
-    63,
-    64,
-    64,
-    65,
-    65,
-    65,
-    65,
-    64,
-    64,
-    63,
-    62,
-    60,
-    59,
-    57,
-    56,
-    54,
-    52,
-    50,
-    48,
-    46,
-    44,
-    43,
-    41,
-    40,
-    38,
-    37,
-    36,
-    36,
-    35,
-    35,
-    35,
-    35,
-    36,
-    36,
-    37,
-    38,
-    40,
-    41,
-    43,
-    44,
-    46,
-    48,
-};
+// amount to bit shift sample position such that the sample rate is reduced
+// by a factor. explicitly, decreases the sample rate by a factor
+// of 2^SAMPLE_RATE_FACTOR_SHIFT. e.g. to decrease the sample rate by a factor of 8,
+// set this to 3.
+#define SAMPLE_RATE_FACTOR_SHIFT 2
+
+// saturation voltage in volts
+#define VDD 3.3
+
+// amplitude of input sine wave in volts
+#define AMPLITUDE 0.1
+
+// frequency (in kHz) to set clock at
+#define CLK_KHZ 200000
+#define KHZ_TO_HZ 1000.0
+
+// for calculating sine
+#define PI 3.14159265
+
+void pwm_interrupt_handler();
+void generate_sine_wave(uint32_t sine_frequency);

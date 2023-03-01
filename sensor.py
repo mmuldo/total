@@ -29,7 +29,7 @@ NUM_SAMPLES_PER_PERIOD = 25
 SERIAL_WAIT_S = 0.002
 
 # feedback resistance in transimpedence amplifier in ohms
-TIA_RF = 100e3
+TIA_RF = 10e3
 
 # max voltage of pico in volts
 VDD = 3.3
@@ -272,11 +272,14 @@ def get_measurements(
         readings.append(float(reading))
 
     # assume samples for conductivity measurement are the first portion of readings
+    #samples = np.array(readings)
     samples = np.array(readings[:-2])
     # assume temperature measurement is second to last measurement
     temperature = readings[-2]
+    #temperature = 0
     # assume pressure measurement is last measurement
     pressure = readings[-1]
+    #pressure = 0
 
     # assume vin are the even-indexed samples
     vin = samples[::2]
