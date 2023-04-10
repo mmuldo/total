@@ -72,6 +72,6 @@ int main(void) {
         false               // don't start immediately
     );
 
-    dma_start_channel(PWM_DMA_CHANNEL);
-    dma_start_channel(RESET_DMA_CHANNEL);
+    dma_channel_start(PWM_DMA_CHANNEL);
+    dma_channel_start(RESET_DMA_CHANNEL);
 }
