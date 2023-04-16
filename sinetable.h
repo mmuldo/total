@@ -1,6 +1,6 @@
 #define SINE_TABLE_LENGTH 50
 
-uint8_t SINE_TABLE[] = {
+uint32_t SINE_TABLE[] = {
     50,
     52,
     54,
