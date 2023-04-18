@@ -5,7 +5,7 @@ import sys
 AMPLITUDE = 1/3.3
 OFFSET = 1
 
-OUT_FILE_NAME = 'sine.h'
+OUT_FILE_NAME = 'sinetable.h'
 TEMPLATES_DIR = 'templates'
 
 def sine_table(length: int, max_value: int) -> list[float]:
