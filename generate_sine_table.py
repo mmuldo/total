@@ -2,22 +2,21 @@ import numpy as np
 import jinja2 as j2
 import sys
 
-AMPLITUDE = 1/3.3
-OFFSET = 1
+VDD = 3.3
 
 OUT_FILE_NAME = 'sinetable.h'
 TEMPLATES_DIR = 'templates'
 
-def sine_table(length: int, max_value: int) -> list[float]:
+def sine_table(length: int, amplitude: float) -> list[float]:
     sine = np.array([
-        round((max_value/2) * (AMPLITUDE*np.sin(2 * np.pi * i / length) + OFFSET))
+        round(length * ((2*amplitude/VDD)*np.sin(2 * np.pi * i / length) + 1))
         for i in range(length)
     ])
 
     return list(sine)
 
-def generate_file(length: int, max_value: int):
-    sine = sine_table(length, max_value)
+def generate_file(length: int, amplitude: float, filename: str=OUT_FILE_NAME):
+    sine = sine_table(length, amplitude)
 
     env = j2.Environment(
         loader=j2.FileSystemLoader(TEMPLATES_DIR),
@@ -28,7 +27,31 @@ def generate_file(length: int, max_value: int):
 
     output = template.render(length=length, table=sine)
 
-    with open(OUT_FILE_NAME, 'w') as out_file:
+    with open(filename, 'w') as out_file:
         out_file.write(output)
 
-generate_file(int(sys.argv[1]), int(sys.argv[2]))
+def generate_files(lengths: list[int], amplitude: float):
+    tables = {
+        length: sine_table(length, amplitude)
+        for length in lengths
+    }
+
+    env = j2.Environment(
+        loader=j2.FileSystemLoader(TEMPLATES_DIR),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template(f'sinetables.h.j2')
+
+    output = template.render(tables=tables)
+
+    with open('sinetables.h', 'w') as out_file:
+        out_file.write(output)
+
+
+
+#length = int(sys.argv[1])
+#amplitude = float(sys.argv[2])
+#filename = sys.argv[3] if len(sys.argv) >= 3 else OUT_FILE_NAME
+
+generate_files([(i+1)*100 for i in range(10)], 1)

@@ -1,0 +1,9 @@
+{% for length, table in tables.items() %}
+#define LENGTH_{{ length }}_SINE_TABLE_LENGTH {{ length }}
+uint32_t LENGTH_{{ length }}_SINE_TABLE[] = {
+    {% for sample in table %}
+    {{ sample }},
+    {% endfor %}
+};
+
+{% endfor %}

@@ -9,7 +9,7 @@
 #include "hardware/gpio.h"
 #include "hardware/dma.h"
 
-#include "sinetable.h"
+#include "sinetables.h"
 
 #define PWM_DMA_CHANNEL 1
 #define RESET_DMA_CHANNEL 2
@@ -17,11 +17,12 @@
 #define INPUT_SIGNAL_PIN 0
 #define CLK_KHZ 250000
 #define KHZ_TO_HZ 1000
-#define WRAP 2*SINE_TABLE_LENGTH
 #define PI 3.1415926535
 #define VDD 3.3
 
-uint32_t * sine_table_address_pointer = &SINE_TABLE[0];
+uint32_t * sine_table;
+int sine_table_length;
+uint32_t * sine_table_pointer;
 
 uint32_t * generate_sine_table(int length, double amplitude) {
     uint32_t * sine_table = malloc(length*sizeof(uint32_t));
@@ -33,10 +34,59 @@ uint32_t * generate_sine_table(int length, double amplitude) {
     return sine_table;
 }
 
+int highest_frequency_to_table_length(float frequency) {
+    return (int) round(sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * frequency)));
+}
+
 int main(void) {
-    float sine_frequency = 3745;
-    int sine_table_length = (int) round(sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * sine_frequency)));
-    uint32_t * sine_table = generate_sine_table(sine_table_length, 1);
+    float sine_frequency = 12500;
+    // uint32_t * sine_table_pointer;
+
+    int table_length_given_highest_frequency = highest_frequency_to_table_length(sine_frequency);
+    // if (100 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 200) {
+    //     sine_table = LENGTH_100_SINE_TABLE;
+    //     sine_table_length = LENGTH_100_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_100_SINE_TABLE[0];
+    // } else if (200 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 300) {
+    //     sine_table = LENGTH_200_SINE_TABLE;
+    //     sine_table_length = LENGTH_200_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_200_SINE_TABLE[0];
+    // } else if (300 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 400) {
+    //     sine_table = LENGTH_300_SINE_TABLE;
+    //     sine_table_length = LENGTH_300_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_300_SINE_TABLE[0];
+    // } else if (400 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 500) {
+    //     sine_table = LENGTH_400_SINE_TABLE;
+    //     sine_table_length = LENGTH_400_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_400_SINE_TABLE[0];
+    // } else if (500 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 600) {
+    //     sine_table = LENGTH_500_SINE_TABLE;
+    //     sine_table_length = LENGTH_500_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_500_SINE_TABLE[0];
+    // } else if (600 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 700) {
+    //     sine_table = LENGTH_600_SINE_TABLE;
+    //     sine_table_length = LENGTH_600_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_600_SINE_TABLE[0];
+    // } else if (700 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 800) {
+    //     sine_table = LENGTH_700_SINE_TABLE;
+    //     sine_table_length = LENGTH_700_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_700_SINE_TABLE[0];
+    // } else if (800 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 900) {
+    //     sine_table = LENGTH_800_SINE_TABLE;
+    //     sine_table_length = LENGTH_800_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_800_SINE_TABLE[0];
+    // } else if (900 <= table_length_given_highest_frequency && table_length_given_highest_frequency < 1000) {
+    //     sine_table = LENGTH_900_SINE_TABLE;
+    //     sine_table_length = LENGTH_900_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_900_SINE_TABLE[0];
+    // } else {
+    //     sine_table = LENGTH_1000_SINE_TABLE;
+    //     sine_table_length = LENGTH_1000_SINE_TABLE_LENGTH;
+    //     sine_table_pointer = &LENGTH_1000_SINE_TABLE[0];
+    // }
+    sine_table_length = table_length_given_highest_frequency;
+    sine_table = generate_sine_table(sine_table_length, 1);
+    sine_table_pointer = sine_table;
 
     set_sys_clock_khz(CLK_KHZ, true);
 
@@ -47,9 +97,13 @@ int main(void) {
 
     // initialize pwm config: clock division and wrap
     pwm_config config = pwm_get_default_config();
-    float clkdiv = CLK_KHZ * KHZ_TO_HZ / (WRAP * SINE_TABLE_LENGTH * sine_frequency);
+    int wrap = 2*sine_table_length;
+    float clkdiv = CLK_KHZ * KHZ_TO_HZ / (wrap * sine_table_length * sine_frequency);
+
+    // pwm_config_set_clkdiv(&config, clkdiv); 
     pwm_config_set_clkdiv(&config, 1.0); 
-    pwm_config_set_wrap(&config, 2*sine_table_length); 
+    pwm_config_set_wrap(&config, wrap); 
+    // pwm_config_set_wrap(&config, 2*LENGTH_100_SINE_TABLE_LENGTH); 
     pwm_init(pin_slice, &config, true);
 
     dma_channel_config pwm_channel = dma_channel_get_default_config(PWM_DMA_CHANNEL);
@@ -78,7 +132,7 @@ int main(void) {
         RESET_DMA_CHANNEL,
         &reset_channel,
         &dma_hw->ch[PWM_DMA_CHANNEL].read_addr,            // write address
-        &sine_table,      // read address
+        &sine_table_pointer,      // read address
         1,  // number of transfers to do
         false               // don't start immediately
     );
