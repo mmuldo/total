@@ -11,7 +11,8 @@
 #include "i2c.h"
 #include "adc.h"
 //#include "pwm.h"
-#include "sine.h"
+//#include "sine.h"
+#include "dmapwm.h"
 
 
 // arbitrary length of time to pause while waiting for things to initialize
@@ -59,51 +60,69 @@ uint32_t read_int_from_serial() {
     return atoi(str);
 }
 
+float read_frequency_from_serial() {
+    float frequency = 0;
+    int16_t character;
+    
+    character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    while(character != 'a') {
+        if (character != PICO_ERROR_TIMEOUT) {
+            frequency = 10*frequency + character - '0';
+        }
+        character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    }
+
+    return frequency;
+}
+
 /*
  * code that core 1 will run
  *
  * generates a sine wave using pwm
  */
-void core1_entry() {
-    // get frequency from core 0
-    uint32_t sine_freq = multicore_fifo_pop_blocking();
+// void core1_entry() {
+//     // get frequency from core 0
+//     uint32_t sine_freq = multicore_fifo_pop_blocking();
 
-    generate_sine_wave(sine_freq);
-}
+//     generate_sine_wave(sine_freq);
+// }
 
 
 int main(void) {
     stdio_init_all();
-    init_i2c();
+    //init_i2c();
+    float sine_frequency = 4562.0;
 
-    // set system clock
-    set_sys_clock_khz(CLK_KHZ, true); 
+    generate_sine_wave(INPUT_SIGNAL_PIN, sine_frequency);
 
-    // for reading temperature and pressure
-    double temperature, pressure;
+//     // set system clock
+//     set_sys_clock_khz(CLK_KHZ, true); 
 
-    while(true) {
-        // get sine frequency from serial input
-        uint32_t sine_frequency = read_int_from_serial();
+//     // for reading temperature and pressure
+//     double temperature, pressure;
 
-        // read temperature and pressure
-        get_temperature_and_pressure(&temperature, &pressure);
+//     while(true) {
+//         // get sine frequency from serial input
+//         uint32_t sine_frequency = read_int_from_serial();
 
-        // restart core 1 send frequency to core 1
-        multicore_reset_core1();
-        multicore_launch_core1(core1_entry);
-        multicore_fifo_push_blocking(sine_frequency);
+//         // read temperature and pressure
+//         get_temperature_and_pressure(&temperature, &pressure);
 
-        // wait for signals to achieve steady state before taking readings
-        sleep_ms(SIGNAL_STEADY_WAIT_TIME_MS);
+//         // restart core 1 send frequency to core 1
+//         multicore_reset_core1();
+//         multicore_launch_core1(core1_entry);
+//         multicore_fifo_push_blocking(sine_frequency);
 
-        init_adc_and_dma(sine_frequency, samples);
-        sample_signals(samples);
-        printf("%.3f\n", temperature);
-        // data tends to corrupt if we send to serial i/o too fast,
-        // so this is just to make sure it all gets printed cleanly
-        sleep_ms(1);
-        printf("%.3f\n", pressure);
-        sleep_ms(1);
-    }
+//         // wait for signals to achieve steady state before taking readings
+//         sleep_ms(SIGNAL_STEADY_WAIT_TIME_MS);
+
+//         init_adc_and_dma(sine_frequency, samples);
+//         sample_signals(samples);
+//         printf("%.3f\n", temperature);
+//         // data tends to corrupt if we send to serial i/o too fast,
+//         // so this is just to make sure it all gets printed cleanly
+//         sleep_ms(1);
+//         printf("%.3f\n", pressure);
+//         sleep_ms(1);
+//     }
 }

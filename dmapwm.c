@@ -8,12 +8,7 @@
 #include "hardware/pwm.h"  
 #include "hardware/gpio.h"
 #include "hardware/dma.h"
-
-#define INPUT_SIGNAL_PIN 0
-#define CLK_KHZ 250000
-#define KHZ_TO_HZ 1000
-#define PI 3.1415926535
-#define VDD 3.3
+#include "dmapwm.h"
 
 // global pointer to sine_table (needs to be global so that dma channels have access)
 uint32_t * sine_table;
@@ -141,8 +136,25 @@ void generate_sine_wave(int gpio_pin, float frequency) {
     configure_and_start_pwm_dma_channels(pwm_dma_channel, reset_dma_channel, pwm_pin_slice, sine_table, sine_table_length);
 }
 
-int main(void) {
-    float sine_frequency = 888;
+// float read_frequency_from_serial() {
+//     float frequency = 0;
+//     int16_t character;
+    
+//     character = getchar_timeout_us(5*60*1000000);
+//     while(character != 'a') {
+//         if (character != PICO_ERROR_TIMEOUT) {
+//             frequency = 10*frequency + character - '0';
+//         }
+//         character = getchar_timeout_us(5*60*1000000);
+//     }
 
-    generate_sine_wave(INPUT_SIGNAL_PIN, sine_frequency);
-}
+//     return frequency;
+// }
+
+// int main(void) {
+//     stdio_init_all();
+
+//     float sine_frequency = read_frequency_from_serial();
+
+//     generate_sine_wave(INPUT_SIGNAL_PIN, sine_frequency);
+// }
