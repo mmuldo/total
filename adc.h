@@ -39,5 +39,5 @@
 #define DMA_CHANNEL 0
 
 
-void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[]);
-void sample_signals(uint8_t samples[]);
+void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[], int adc_dma_channel);
+void sample_signals(uint8_t samples[], int adc_dma_channel);

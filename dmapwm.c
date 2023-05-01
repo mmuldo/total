@@ -121,6 +121,8 @@ void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_cha
 /// @brief emit a sinusoidal wave via pwm on the specified gpio pin
 /// @param gpio_pin the pin to emit the wave
 /// @param frequency the frequency of the wave
+/// @param pwm_dma_channel dma channel responsible for reading the given table and writing to the pwm counter compare register
+/// @param reset_dma_channel dma channel responsible for resetting the pwm dma channel back to the start of the table when it is done reading the table
 void generate_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int reset_dma_channel) {
     sine_table_length = highest_frequency_to_table_length(frequency);
     sine_table = generate_sine_table(sine_table_length, 1);
@@ -132,6 +134,11 @@ void generate_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int 
     configure_and_start_pwm_dma_channels(pwm_dma_channel, reset_dma_channel, gpio_pin, sine_table, sine_table_length);
 }
 
+/// @brief change the frequency of a sinusoidal wave being emitted via pwm on a specified gpio pin
+/// @param gpio_pin the pin to emit the wave
+/// @param frequency the frequency of the wave
+/// @param pwm_dma_channel dma channel responsible for reading the given table and writing to the pwm counter compare register
+/// @param reset_dma_channel dma channel responsible for resetting the pwm dma channel back to the start of the table when it is done reading the table
 void change_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int reset_dma_channel) {
     int pwm_pin_slice = pwm_gpio_to_slice_num(gpio_pin);
     // pause everything

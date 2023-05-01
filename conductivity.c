@@ -97,20 +97,28 @@ int main(void) {
     // initialize pwm pin
     gpio_set_function(INPUT_SIGNAL_PIN, GPIO_FUNC_PWM);
 
-    float sine_frequencies[5] = {1000, 2000, 3000, 4000, 5000};
-    //init_i2c();
-    float sine_frequency = sine_frequencies[0];
-
+    // get some dma channels
     int pwm_dma_channel = dma_claim_unused_channel(true);
     int reset_dma_channel = dma_claim_unused_channel(true);
+    int adc_dma_channel = dma_claim_unused_channel(true);
+
+    float sine_frequencies[5] = {1000, 2000, 3000, 4000, 5000};
+    //init_i2c();
+    //float sine_frequency = read_frequency_from_serial();
+    float sine_frequency = sine_frequencies[0];
 
     generate_sine_wave(INPUT_SIGNAL_PIN, sine_frequency, pwm_dma_channel, reset_dma_channel);
+    init_adc_and_dma(sine_frequency, samples, adc_dma_channel);
+    sample_signals(samples, adc_dma_channel);
 
     int idx = 0;
     while (true) {
-        sine_frequency = sine_frequencies[idx];
         idx = (idx + 1) % 5;
+        // sine_frequency = read_frequency_from_serial();
+        sine_frequency = sine_frequencies[idx];
         change_sine_wave(INPUT_SIGNAL_PIN, sine_frequency, pwm_dma_channel, reset_dma_channel);
+        init_adc_and_dma(sine_frequency, samples, adc_dma_channel);
+        sample_signals(samples, adc_dma_channel);
     }
 
 //     // set system clock
