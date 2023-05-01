@@ -13,6 +13,7 @@
 
 uint32_t * generate_sine_table(int length, double amplitude);
 int highest_frequency_to_table_length(float frequency);
-int configure_gpio_pwm_pin(int pin, int sine_table_length);
-void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_channel, int pwm_pin_slice, uint32_t * table, int table_length);
-void generate_sine_wave(int gpio_pin, float frequency);
+void configure_gpio_pwm_pin(int pin, int sine_table_length);
+void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_channel, int gpio_pin, uint32_t * table, int table_length);
+void generate_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int reset_dma_channel);
+void change_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int reset_dma_channel);

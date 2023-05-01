@@ -45,14 +45,8 @@ int highest_frequency_to_table_length(float frequency) {
 /// @brief configures the given gpio pin for pwm
 /// @param pin the pin to emit a pwm wave
 /// @param sine_table_length length of the sine table that will be fed to the pwm counter compare level (used for calculating the wrap)
-/// @return the pwm pin slice
-int configure_gpio_pwm_pin(int pin, int sine_table_length) {
-    set_sys_clock_khz(CLK_KHZ, true);
-
-    // initialize pwm pin
-    gpio_set_function(INPUT_SIGNAL_PIN, GPIO_FUNC_PWM);
-    
-    int pwm_pin_slice = pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN);
+void configure_gpio_pwm_pin(int pin, int sine_table_length) {
+    int pwm_pin_slice = pwm_gpio_to_slice_num(pin);
 
     pwm_config config = pwm_get_default_config();
     // it is convenient to set wrap = 2*length
@@ -60,17 +54,17 @@ int configure_gpio_pwm_pin(int pin, int sine_table_length) {
     pwm_config_set_clkdiv(&config, 1.0); 
     pwm_config_set_wrap(&config, wrap); 
     pwm_init(pwm_pin_slice, &config, true);
-
-    return pwm_pin_slice;
 }
 
 /// @brief configures dma channels for setting the counter compare register of a pwm gpio pin from a table, then starts the channels
 /// @param pwm_dma_channel dma channel responsible for reading the given table and writing to the pwm counter compare register
 /// @param reset_dma_channel dma channel responsible for resetting the pwm dma channel back to the start of the table when it is done reading the table
-/// @param pwm_pin_slice pin slice of gpio pwm pin
+/// @param gpio_pin the pin to emittin the pwm wave
 /// @param table a table of pwm counter compare levels to read from
 /// @param table_length the length of the table
-void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_channel, int pwm_pin_slice, uint32_t * table, int table_length) {
+void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_channel, int gpio_pin, uint32_t * table, int table_length) {
+    int pwm_pin_slice = pwm_gpio_to_slice_num(gpio_pin);
+
     dma_channel_config pwm_dma_channel_config = dma_channel_get_default_config(pwm_dma_channel);
     dma_channel_config reset_dma_channel_config = dma_channel_get_default_config(reset_dma_channel);
 
@@ -119,21 +113,47 @@ void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_cha
 
     // start the channels
     dma_start_channel_mask(1u << pwm_dma_channel);
+
+    sleep_ms(1000);
 }
 
 
 /// @brief emit a sinusoidal wave via pwm on the specified gpio pin
 /// @param gpio_pin the pin to emit the wave
 /// @param frequency the frequency of the wave
-void generate_sine_wave(int gpio_pin, float frequency) {
+void generate_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int reset_dma_channel) {
     sine_table_length = highest_frequency_to_table_length(frequency);
     sine_table = generate_sine_table(sine_table_length, 1);
 
-    int pwm_pin_slice = configure_gpio_pwm_pin(gpio_pin, sine_table_length);
+    configure_gpio_pwm_pin(gpio_pin, sine_table_length);
 
-    int pwm_dma_channel = dma_claim_unused_channel(true);
-    int reset_dma_channel = dma_claim_unused_channel(true);
-    configure_and_start_pwm_dma_channels(pwm_dma_channel, reset_dma_channel, pwm_pin_slice, sine_table, sine_table_length);
+    //int pwm_dma_channel = dma_claim_unused_channel(true);
+    //int reset_dma_channel = dma_claim_unused_channel(true);
+    configure_and_start_pwm_dma_channels(pwm_dma_channel, reset_dma_channel, gpio_pin, sine_table, sine_table_length);
+}
+
+void change_sine_wave(int gpio_pin, float frequency, int pwm_dma_channel, int reset_dma_channel) {
+    int pwm_pin_slice = pwm_gpio_to_slice_num(gpio_pin);
+    // pause everything
+    pwm_set_enabled(pwm_pin_slice, false);
+
+    free(sine_table);
+    sine_table_length = highest_frequency_to_table_length(frequency);
+    sine_table = generate_sine_table(sine_table_length, 1);
+
+    // reconfigure pwm stuff
+    configure_gpio_pwm_pin(gpio_pin, sine_table_length);
+
+    // reconfigure dma stuff
+    dma_channel_set_read_addr(pwm_dma_channel, sine_table, false);
+    dma_channel_set_trans_count(pwm_dma_channel, sine_table_length, false);
+    dma_channel_set_read_addr(reset_dma_channel, &sine_table, false);
+
+    // resume
+    pwm_set_enabled(pwm_pin_slice, true);
+
+    // wait for steady state
+    sleep_ms(1000);
 }
 
 // float read_frequency_from_serial() {
