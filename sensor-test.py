@@ -311,20 +311,24 @@ def get_measurements(
 def main():
     frequency, output_file, show_plot, plot_file = get_args()
 
-    if frequency > MAX_FREQ_HZ or frequency < MIN_FREQ_HZ:
-        # if frequency invalid, exit
-        print(f'Error: please specify integer frequency between {MIN_FREQ_HZ} to {MAX_FREQ_HZ} Hz')
-        exit(1)
-
     # initialize serial i/o
     ser = serialio.init_serial()
+    serialio.write_string(f'{frequency}', ser)
+    samples = []
+    while ser.in_waiting == 0: pass
+    time.sleep(1)
+    while ser.in_waiting != 0:
+        print(ser.in_waiting)
+        samples += [sample for sample in ser.read_until(size=ser.in_waiting)]
+    samples = 3.3/((1<<8)-1) * np.array(samples) - 1.65
+    print()
+    print(samples.shape)
+    vin = samples[::2]
+    vout = samples[1::2]
+    #vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    #vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
 
-    # get measurement
-    impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
-
-    print(f'Impedence: {format_impedence(impedence)} Ohms')
-    print(f'Temperature: {temperature} C')
-    print(f'Pressure: {pressure} mBars')
+    plot(vin, vout, frequency, 0, True)
 
 if __name__ == '__main__':
     main()

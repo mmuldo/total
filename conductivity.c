@@ -7,6 +7,7 @@
 #include "pico/multicore.h"
 #include "hardware/watchdog.h"
 #include "hardware/dma.h"
+#include "hardware/adc.h"
 
 // libraries in this project
 #include "i2c.h"
@@ -102,23 +103,27 @@ int main(void) {
     int reset_dma_channel = dma_claim_unused_channel(true);
     int adc_dma_channel = dma_claim_unused_channel(true);
 
-    float sine_frequencies[5] = {1000, 2000, 3000, 4000, 5000};
     //init_i2c();
-    //float sine_frequency = read_frequency_from_serial();
-    float sine_frequency = sine_frequencies[0];
+    float sine_frequency = read_frequency_from_serial();
+    //float sine_frequency = 2000;
 
     generate_sine_wave(INPUT_SIGNAL_PIN, sine_frequency, pwm_dma_channel, reset_dma_channel);
-    init_adc_and_dma(sine_frequency, samples, adc_dma_channel);
-    sample_signals(samples, adc_dma_channel);
+    // init_adc_and_dma(sine_frequency, samples, adc_dma_channel);
+    // sample_signals(samples, adc_dma_channel);
+    // dma_start_channel_mask(1u << adc_dma_channel);
+    // adc_run(true);
+    // dma_channel_wait_for_finish_blocking(adc_dma_channel);
 
-    int idx = 0;
+    //sleep_ms(1);
+    while(true) {
+        tight_loop_contents();
+    }
+
     while (true) {
-        idx = (idx + 1) % 5;
-        // sine_frequency = read_frequency_from_serial();
-        sine_frequency = sine_frequencies[idx];
+        float sine_frequency = read_frequency_from_serial();
         change_sine_wave(INPUT_SIGNAL_PIN, sine_frequency, pwm_dma_channel, reset_dma_channel);
-        init_adc_and_dma(sine_frequency, samples, adc_dma_channel);
-        sample_signals(samples, adc_dma_channel);
+        // init_adc_and_dma(sine_frequency, samples, adc_dma_channel);
+        // sample_signals(samples, adc_dma_channel);
     }
 
 //     // set system clock

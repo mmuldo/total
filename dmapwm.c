@@ -11,9 +11,9 @@
 #include "dmapwm.h"
 
 // global pointer to sine_table (needs to be global so that dma channels have access)
-uint32_t * sine_table;
+volatile uint32_t * sine_table;
 // sine table length also global just for consistency
-int sine_table_length;
+volatile int sine_table_length;
 
 
 /// @brief creates an table whose entries are the pwm counter compare level corresponding to the appropriate sine function value
@@ -62,7 +62,7 @@ void configure_gpio_pwm_pin(int pin, int sine_table_length) {
 /// @param gpio_pin the pin to emittin the pwm wave
 /// @param table a table of pwm counter compare levels to read from
 /// @param table_length the length of the table
-void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_channel, int gpio_pin, uint32_t * table, int table_length) {
+void configure_and_start_pwm_dma_channels(int pwm_dma_channel, int reset_dma_channel, int gpio_pin, volatile uint32_t * table, int table_length) {
     int pwm_pin_slice = pwm_gpio_to_slice_num(gpio_pin);
 
     dma_channel_config pwm_dma_channel_config = dma_channel_get_default_config(pwm_dma_channel);
