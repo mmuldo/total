@@ -317,16 +317,18 @@ def main():
     samples = []
     while ser.in_waiting == 0: pass
     time.sleep(1)
+
     while ser.in_waiting != 0:
         print(ser.in_waiting)
         samples += [sample for sample in ser.read_until(size=ser.in_waiting)]
     samples = 3.3/((1<<8)-1) * np.array(samples) - 1.65
-    print()
     print(samples.shape)
-    vin = samples[::2]
-    vout = samples[1::2]
+    #vin = samples[::2]
+    #vout = samples[1::2]
     #vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
     #vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    vin = samples[:NUM_SAMPLES_PER_PERIOD]
+    vout = samples[NUM_SAMPLES_PER_PERIOD:]
 
     plot(vin, vout, frequency, 0, True)
 

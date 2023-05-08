@@ -263,16 +263,14 @@ def get_measurements(
     # wait for readings to be taken
     while ser.in_waiting == 0: pass
 
-    #time.sleep(3.5)
-    readings = []
-    while ser.in_waiting > 0:
-        time.sleep(SERIAL_WAIT_S)
-        #reading = ser.readline().decode('utf-8')
-        reading = serialio.readline(ser)
-        readings.append(float(reading))
+    time.sleep(1)
+    samples = []        
+    #while ser.in_waiting > 0:
+    samples += [sample for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)]
+    samples = 3.3/((1<<8)-1) * np.array(samples) - 1.65
 
     # assume samples for conductivity measurement are the first portion of readings
-    samples = np.array(readings)
+    #samples = np.array(readings)
     #samples = np.array(readings[:-2])
     # assume temperature measurement is second to last measurement
     #temperature = readings[-2]
@@ -280,17 +278,23 @@ def get_measurements(
     # assume pressure measurement is last measurement
     #pressure = readings[-1]
     pressure = 0
+    time.sleep(1)
+    if True:
+        temperature = float(serialio.readline(ser))
+        pressure = float(serialio.readline(ser))
 
     # assume vin are the even-indexed samples
-    vin = samples[::2]
+    #vin = samples[::2]
+    vin = samples[:NUM_SAMPLES_PER_PERIOD]
     # assume vout are the odd-indexed samples
-    vout = samples[1::2]
+    #vout = samples[1::2]
+    vout = samples[NUM_SAMPLES_PER_PERIOD:]
 
     # take average signal over each period
-    vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
-    vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    #vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    #vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
 
-    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=VDD/2)
+    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=0)
 
     if output_file:
         path = Path(output_file)

@@ -30,7 +30,7 @@ pico_sdk_init()
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(sensor)
-target_sources(sensor PRIVATE sensor.c)
+target_sources(sensor PRIVATE sensor.c i2c.c)
 
 pico_set_program_name(sensor "sensor")
 pico_set_program_version(sensor "0.1")

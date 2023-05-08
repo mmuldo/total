@@ -9,6 +9,8 @@
 #include "hardware/pwm.h"  
 #include "hardware/gpio.h"
 
+#include "i2c.h"
+
 // pin at which sine wave will be emitted
 #define INPUT_SIGNAL_PIN 0
 
@@ -69,6 +71,10 @@ int sine_table_length;
 uint8_t samples[TOTAL_NUM_SAMPLES];
 // for printing to serial i/o
 char samples_string[TOTAL_NUM_SAMPLES+1];
+
+uint32_t input_period[NUM_SAMPLES_PER_PERIOD];
+uint32_t output_period[NUM_SAMPLES_PER_PERIOD];
+char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
 
 /// @brief creates an table whose entries are the pwm counter compare level corresponding to the appropriate sine function value
 /// @param length the length of the table
@@ -216,6 +222,39 @@ void sample_signals(int adc_dma_channel) {
 
     adc_run(false);
     adc_fifo_drain();
+    adc_select_input(ADC_FIRST_PIN);
+}
+
+void average_period(uint8_t samples[], uint32_t input_period[], uint32_t output_period[], char periods_string[]) {
+    // clear buffers
+    for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
+        input_period[j] = 0;
+        output_period[j] = 0;
+    }
+    
+    // sum over all periods
+    for (int i = 0; i < NUM_PERIODS; i++) {
+        for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
+            input_period[j] = input_period[j] + samples[2*(NUM_SAMPLES_PER_PERIOD*i + j)];
+            output_period[j] = output_period[j] + samples[2*(NUM_SAMPLES_PER_PERIOD*i + j) + 1];
+        }
+    }
+    
+    // average over all periods
+    for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
+        periods_string[j] = (int) round((float) input_period[j] / NUM_PERIODS);
+        periods_string[NUM_SAMPLES_PER_PERIOD + j] = (int) round((float) output_period[j] / NUM_PERIODS);
+    }
+    
+    // ensure none are '\0' (would end string)
+    for (int k = 0; k < 2*NUM_SAMPLES_PER_PERIOD; k++) {
+        if (periods_string[k] == 0) {
+            periods_string[k] = 1;
+        }
+    }
+    
+    // end string
+    periods_string[2*NUM_SAMPLES_PER_PERIOD] = '\0';
 }
 
 void print_samples(uint8_t samples[], char samples_string[]) {
@@ -235,6 +274,8 @@ void print_samples(uint8_t samples[], char samples_string[]) {
 
 int main(void) {
     stdio_init_all();
+    init_i2c();
+    double temperature, pressure;
 
     set_sys_clock_khz(CLK_KHZ, true);
 
@@ -272,7 +313,16 @@ int main(void) {
     // for (int i = 0; i < TOTAL_NUM_SAMPLES; i += 2) {
     //     printf("%d,", samples[i]);
     // }
-    print_samples(samples, samples_string);
+    //print_samples(samples, samples_string);
+    average_period(samples, input_period, output_period, periods_string);
+    printf(periods_string);
+    
+    if (true) {
+        get_temperature_and_pressure(&temperature, &pressure);
+        printf("%.3f\n", temperature);
+        sleep_ms(1);
+        printf("%.3f\n", pressure);
+    }
 
     while (true) {
         // reset adc dma channel
@@ -309,6 +359,15 @@ int main(void) {
         // for (int i = 0; i < TOTAL_NUM_SAMPLES; i += 2) {
         //     printf("%d,", samples[i]);
         // }
-        print_samples(samples, samples_string);
+        //print_samples(samples, samples_string);
+        average_period(samples, input_period, output_period, periods_string);
+        printf(periods_string);
+        
+        if (true) {
+            get_temperature_and_pressure(&temperature, &pressure);
+            printf("%.3f\n", temperature);
+            sleep_ms(1);
+            printf("%.3f\n", pressure);
+        }
     }
 }
