@@ -14,6 +14,12 @@ include(pico_sdk_import.cmake)
 
 project(conductivity C CXX ASM)
 
+if (PICO_DEOPTIMIZED_DEBUG)
+    message("Using fully de-optimized debug build (set PICO_DEOPTIMIZED_DEBUG=0 to optimize)")
+else()
+    message("Using regular optimized debug build (set PICO_DEOPTIMIZED_DEBUG=1 to de-optimize)")
+endif()
+
 set(PICO_CXX_ENABLE_EXCEPTIONS 1)
 
 set(PICO_CXX_ENABLE_RTTI 1)
@@ -24,7 +30,7 @@ pico_sdk_init()
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(conductivity)
-target_sources(conductivity PRIVATE conductivity.c i2c.c adc.c pwm.c)
+target_sources(conductivity PRIVATE conductivity.c i2c.c adc.c dmapwm.c)
 
 pico_set_program_name(conductivity "conductivity")
 pico_set_program_version(conductivity "0.1")

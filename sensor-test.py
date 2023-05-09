@@ -263,14 +263,16 @@ def get_measurements(
     # wait for readings to be taken
     while ser.in_waiting == 0: pass
 
-    time.sleep(1)
-    samples = []        
-    #while ser.in_waiting > 0:
-    samples += [sample for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)]
-    samples = 3.3/((1<<8)-1) * np.array(samples) - 1.65
+    #time.sleep(3.5)
+    readings = []
+    while ser.in_waiting > 0:
+        time.sleep(SERIAL_WAIT_S)
+        #reading = ser.readline().decode('utf-8')
+        reading = serialio.readline(ser)
+        readings.append(float(reading))
 
     # assume samples for conductivity measurement are the first portion of readings
-    #samples = np.array(readings)
+    samples = np.array(readings)
     #samples = np.array(readings[:-2])
     # assume temperature measurement is second to last measurement
     #temperature = readings[-2]
@@ -278,23 +280,17 @@ def get_measurements(
     # assume pressure measurement is last measurement
     #pressure = readings[-1]
     pressure = 0
-    time.sleep(1)
-    if True:
-        temperature = float(serialio.readline(ser))
-        pressure = float(serialio.readline(ser))
 
     # assume vin are the even-indexed samples
-    #vin = samples[::2]
-    vin = samples[:NUM_SAMPLES_PER_PERIOD]
+    vin = samples[::2]
     # assume vout are the odd-indexed samples
-    #vout = samples[1::2]
-    vout = samples[NUM_SAMPLES_PER_PERIOD:]
+    vout = samples[1::2]
 
     # take average signal over each period
-    #vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
-    #vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
 
-    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=0)
+    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=VDD/2)
 
     if output_file:
         path = Path(output_file)
@@ -315,20 +311,26 @@ def get_measurements(
 def main():
     frequency, output_file, show_plot, plot_file = get_args()
 
-    if frequency > MAX_FREQ_HZ or frequency < MIN_FREQ_HZ:
-        # if frequency invalid, exit
-        print(f'Error: please specify integer frequency between {MIN_FREQ_HZ} to {MAX_FREQ_HZ} Hz')
-        exit(1)
-
     # initialize serial i/o
     ser = serialio.init_serial()
+    serialio.write_string(f'{frequency}', ser)
+    samples = []
+    while ser.in_waiting == 0: pass
+    time.sleep(1)
 
-    # get measurement
-    impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
+    while ser.in_waiting != 0:
+        print(ser.in_waiting)
+        samples += [sample for sample in ser.read_until(size=ser.in_waiting)]
+    samples = 3.3/((1<<8)-1) * np.array(samples) - 1.65
+    print(samples.shape)
+    #vin = samples[::2]
+    #vout = samples[1::2]
+    #vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    #vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
+    vin = samples[:NUM_SAMPLES_PER_PERIOD]
+    vout = samples[NUM_SAMPLES_PER_PERIOD:]
 
-    print(f'Impedence: {format_impedence(impedence)} Ohms')
-    print(f'Temperature: {temperature} C')
-    print(f'Pressure: {pressure} mBars')
+    plot(vin, vout, frequency, 0, True)
 
 if __name__ == '__main__':
     main()

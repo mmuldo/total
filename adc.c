@@ -19,7 +19,7 @@
  *  samples : uint8_t[]
  *      buffer in which samples will be stored
  */
-void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[]) {
+void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[], int adc_dma_channel) {
     // ADC STUFF
     adc_gpio_init(ADC_GPIO_PINS + ADC_FIRST_PIN);
     adc_gpio_init(ADC_GPIO_PINS + ADC_SECOND_PIN);
@@ -41,7 +41,7 @@ void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[]) {
 
 
     // DMA STUFF
-    dma_channel_config channel = dma_channel_get_default_config(DMA_CHANNEL);
+    dma_channel_config channel = dma_channel_get_default_config(adc_dma_channel);
 
     channel_config_set_transfer_data_size(&channel, DMA_SIZE_8);
     channel_config_set_read_increment(&channel, false);
@@ -49,7 +49,7 @@ void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[]) {
     channel_config_set_dreq(&channel, DREQ_ADC);
 
     dma_channel_configure(
-        DMA_CHANNEL,
+        adc_dma_channel,
         &channel,
         samples,            // write address
         &adc_hw->fifo,      // read address
@@ -66,21 +66,27 @@ void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[]) {
  *  samples : uint8_t[]
  *      buffer in which samples will be stored
  */
-void sample_signals(uint8_t samples[]) {
-    dma_channel_start(DMA_CHANNEL);
-    adc_run(true);
-    dma_channel_wait_for_finish_blocking(DMA_CHANNEL);
-
+void sample_signals(uint8_t samples[], int adc_dma_channel) {
     // stop adc and drain fifo, just so everything is clean for next run
+    dma_channel_start(adc_dma_channel);
+    adc_run(true);
+
+    dma_channel_wait_for_finish_blocking(adc_dma_channel);
+
     adc_run(false);
     adc_fifo_drain();
 
+    // printf("%d\n", samples[0]);
+    // printf("%d\n", samples[1]);
+    // printf("%d\n", samples[2]);
+
     // send samples over serial i/o
-    for (uint i = 0; i < TOTAL_NUM_SAMPLES; i++) {
-        printf("%.3f\n", (float) ADC_CONVERT*samples[i]);
-        // data tends to corrupt if we send to serial i/o too fast,
-        // so this is just to make sure it all gets printed cleanly
-        sleep_ms(1);
-    }
+    //for (uint i = 0; i < TOTAL_NUM_SAMPLES; i++) {
+    //    float volatile voltage = (float) ADC_CONVERT*samples[i];
+    //    printf("%.3f\n", voltage);
+    //    // data tends to corrupt if we send to serial i/o too fast,
+    //    // so this is just to make sure it all gets printed cleanly
+    //    sleep_ms(1);
+    //}
 }
 
