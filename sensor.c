@@ -24,6 +24,8 @@
 // for calculating sine
 #define PI 3.1415926535
 
+#define AMPLITUDE 0.75
+
 // pins to switch between for adc round robin sampling
 #define ADC_PIN_MASK 0b0011
 
@@ -284,7 +286,7 @@ int main(void) {
 
     // get sine table given frequency
     sine_table_length = highest_frequency_to_table_length(sine_frequency);
-    sine_table = generate_sine_table(sine_table_length, 0.5);
+    sine_table = generate_sine_table(sine_table_length, AMPLITUDE);
 
     // get some dma channels we can use
     int pwm_dma_channel = dma_claim_unused_channel(true);
@@ -340,7 +342,7 @@ int main(void) {
         // generate new sine table
         free(sine_table);
         sine_table_length = highest_frequency_to_table_length(sine_frequency);
-        sine_table = generate_sine_table(sine_table_length, 0.5);
+        sine_table = generate_sine_table(sine_table_length, AMPLITUDE);
 
         // re-init pwm with new parameters
         init_pwm(pwm_pin_slice, sine_table_length);
