@@ -10,6 +10,7 @@
 #include "hardware/gpio.h"
 
 #include "i2c.h"
+#include "linalg.h"
 
 // pin at which sine wave will be emitted
 #define INPUT_SIGNAL_PIN 0
