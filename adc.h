@@ -35,9 +35,6 @@
 // frequency at which dedicated adc clock is running at
 #define ADC_CLOCK_FREQUENCY_HZ 48000000
 
-// dma channel we will use
-#define DMA_CHANNEL 0
-
-
-void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[], int adc_dma_channel);
-void sample_signals(uint8_t samples[], int adc_dma_channel);
+void init_adc(float sine_frequency);
+void init_adc_dma(int adc_dma_channel, uint8_t samples[]);
+void sample_signals(int adc_dma_channel);

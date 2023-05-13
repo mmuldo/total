@@ -8,18 +8,7 @@
 
 #include "adc.h"
 
-/*
- * initializes the adc pins and the dma
- *
- * Parameters
- * ----------
- *  sine_frequency : uint32_t
- *      frequency of sine waves that are being sampled;
- *      determines the sampling frequency
- *  samples : uint8_t[]
- *      buffer in which samples will be stored
- */
-void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[], int adc_dma_channel) {
+void init_adc(float sine_frequency) {
     // ADC STUFF
     adc_gpio_init(ADC_GPIO_PINS + ADC_FIRST_PIN);
     adc_gpio_init(ADC_GPIO_PINS + ADC_SECOND_PIN);
@@ -38,8 +27,9 @@ void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[], int adc_dma_ch
     // sample frequency must be twice as fast because we're sampling 2 signals
     float sample_frequency = 2*NUM_SAMPLES_PER_PERIOD * sine_frequency;
     adc_set_clkdiv(ADC_CLOCK_FREQUENCY_HZ / sample_frequency);
+}
 
-
+void init_adc_dma(int adc_dma_channel, uint8_t samples[]) {
     // DMA STUFF
     dma_channel_config channel = dma_channel_get_default_config(adc_dma_channel);
 
@@ -58,16 +48,7 @@ void init_adc_and_dma(uint32_t sine_frequency, uint8_t samples[], int adc_dma_ch
     );
 }
 
-/*
- * samples the sine waves using the adc
- *
- * Parameters
- * ----------
- *  samples : uint8_t[]
- *      buffer in which samples will be stored
- */
-void sample_signals(uint8_t samples[], int adc_dma_channel) {
-    // stop adc and drain fifo, just so everything is clean for next run
+void sample_signals(int adc_dma_channel) {
     dma_channel_start(adc_dma_channel);
     adc_run(true);
 
@@ -75,18 +56,5 @@ void sample_signals(uint8_t samples[], int adc_dma_channel) {
 
     adc_run(false);
     adc_fifo_drain();
-
-    // printf("%d\n", samples[0]);
-    // printf("%d\n", samples[1]);
-    // printf("%d\n", samples[2]);
-
-    // send samples over serial i/o
-    //for (uint i = 0; i < TOTAL_NUM_SAMPLES; i++) {
-    //    float volatile voltage = (float) ADC_CONVERT*samples[i];
-    //    printf("%.3f\n", voltage);
-    //    // data tends to corrupt if we send to serial i/o too fast,
-    //    // so this is just to make sure it all gets printed cleanly
-    //    sleep_ms(1);
-    //}
+    adc_select_input(ADC_FIRST_PIN);
 }
-

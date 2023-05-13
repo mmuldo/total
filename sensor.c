@@ -11,6 +11,8 @@
 
 #include "i2c.h"
 #include "linalg.h"
+#include "sine_analysis.h"
+#include "adc.h"
 
 // pin at which sine wave will be emitted
 #define INPUT_SIGNAL_PIN 0
@@ -26,27 +28,6 @@
 #define PI 3.1415926535
 
 #define AMPLITUDE 0.75
-
-// pins to switch between for adc round robin sampling
-#define ADC_PIN_MASK 0b0011
-
-// starting pin for adc round robin sampling
-#define ADC_FIRST_PIN 1
-
-// second pin for adc round robin sampling
-#define ADC_SECOND_PIN 0
-
-// the first gpio pin where the adc pins are located
-#define ADC_GPIO_PINS 26
-
-// adc voltage at max reading
-#define ADC_VREF 3.3
-
-// max adc reading
-#define ADC_RANGE (1 << 8)
-
-// multiply to convert adc reading to voltage
-#define ADC_CONVERT (ADC_VREF / (ADC_RANGE - 1))
 
 // number of samples in one period of a sine wave
 #define NUM_SAMPLES_PER_PERIOD 25
@@ -78,6 +59,7 @@ char samples_string[TOTAL_NUM_SAMPLES+1];
 uint32_t input_period[NUM_SAMPLES_PER_PERIOD];
 uint32_t output_period[NUM_SAMPLES_PER_PERIOD];
 char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
+double sine_period[1000];
 
 /// @brief creates an table whose entries are the pwm counter compare level corresponding to the appropriate sine function value
 /// @param length the length of the table
@@ -105,27 +87,6 @@ int highest_frequency_to_table_length(float frequency) {
     return (int) round(sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * frequency)));
 }
 
-void init_adc(float sine_frequency) {
-    // ADC STUFF
-    adc_gpio_init(ADC_GPIO_PINS + ADC_FIRST_PIN);
-    adc_gpio_init(ADC_GPIO_PINS + ADC_SECOND_PIN);
-    adc_init();
-    adc_set_round_robin(ADC_PIN_MASK);
-    adc_select_input(ADC_FIRST_PIN);
-
-    adc_fifo_setup(
-        true,   // write adc readings to FIFO
-        true,   // enable dma data request (DREQ)
-        1,      // DREQ asserted when at least 1 sample is present in the FIFO
-        false,  // disable inclusion of error bit
-        true    // FIFO shifts are one byte in size
-    );
-
-    // sample frequency must be twice as fast because we're sampling 2 signals
-    float sample_frequency = 2*NUM_SAMPLES_PER_PERIOD * sine_frequency;
-    adc_set_clkdiv(ADC_CLOCK_FREQUENCY_HZ / sample_frequency);
-}
-
 float read_frequency_from_serial() {
     float frequency = 0;
     int16_t character;
@@ -139,25 +100,6 @@ float read_frequency_from_serial() {
     }
 
     return frequency;
-}
-
-void init_adc_dma(int adc_dma_channel, uint8_t samples[]) {
-    // DMA STUFF
-    dma_channel_config channel = dma_channel_get_default_config(adc_dma_channel);
-
-    channel_config_set_transfer_data_size(&channel, DMA_SIZE_8);
-    channel_config_set_read_increment(&channel, false);
-    channel_config_set_write_increment(&channel, true);
-    channel_config_set_dreq(&channel, DREQ_ADC);
-
-    dma_channel_configure(
-        adc_dma_channel,
-        &channel,
-        samples,            // write address
-        &adc_hw->fifo,      // read address
-        TOTAL_NUM_SAMPLES,  // number of transfers to do
-        false               // don't start immediately
-    );
 }
 
 void init_pwm(int pin_slice, int sine_table_length) {
@@ -217,17 +159,6 @@ void init_pwm_dma(int pwm_dma_channel, int reset_dma_channel, int pwm_pin_slice)
     );
 }
 
-void sample_signals(int adc_dma_channel) {
-    dma_channel_start(adc_dma_channel);
-    adc_run(true);
-
-    dma_channel_wait_for_finish_blocking(adc_dma_channel);
-
-    adc_run(false);
-    adc_fifo_drain();
-    adc_select_input(ADC_FIRST_PIN);
-}
-
 void average_period(uint8_t samples[], uint32_t input_period[], uint32_t output_period[], char periods_string[]) {
     // clear buffers
     for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
@@ -283,7 +214,8 @@ int main(void) {
     set_sys_clock_khz(CLK_KHZ, true);
 
     // read in initial sine frequency
-    float sine_frequency = read_frequency_from_serial();
+    //float sine_frequency = read_frequency_from_serial();
+    float sine_frequency = 1000.0;
 
     // get sine table given frequency
     sine_table_length = highest_frequency_to_table_length(sine_frequency);
@@ -332,7 +264,8 @@ int main(void) {
         dma_channel_set_write_addr(adc_dma_channel, samples, false);
 
         // read in new sine frequency
-        sine_frequency = read_frequency_from_serial();
+        //sine_frequency = read_frequency_from_serial();
+        sine_frequency = sine_frequency + 100;
         // sample frequency must be twice as fast because we're sampling 2 signals
         float sample_frequency = 2*NUM_SAMPLES_PER_PERIOD * sine_frequency;
         adc_set_clkdiv(ADC_CLOCK_FREQUENCY_HZ / sample_frequency);
