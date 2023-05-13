@@ -1,71 +1,68 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <math.h>
 
 #include "pico/stdlib.h"   
-#include "pico/multicore.h"
-#include "hardware/irq.h"  
 #include "hardware/pwm.h"  
-#include "hardware/sync.h" 
 #include "hardware/gpio.h"
+#include "hardware/dma.h"
+#include "dmapwm.h"
 
 #include "pwm.h"
-#include "sinetable.h"
 
-// initialize sine table index
-int sine_position = 0;
-
-/*
- * PWM Interrupt Handler which outputs PWM level and advances the 
- * current sample. 
- * 
- * We repeat the same value for 2^SAMPLE_RATE_FACTOR_SHIFT cycles. This means 
- * the sample rate is adjusted by factor of 2^SAMPLE_RATE_FACTOR_SHIFT.
- */
-void pwm_interrupt_handler() {
-    // clear interrupt flag
-    pwm_clear_irq(pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN));    
-
-    if (sine_position < (SINE_TABLE_LENGTH<<SAMPLE_RATE_FACTOR_SHIFT) - 1) { 
-        // set pwm level 
-        pwm_set_gpio_level(INPUT_SIGNAL_PIN, SINE_TABLE[sine_position>>SAMPLE_RATE_FACTOR_SHIFT]);  
-        sine_position++;
-    } else {
-        // reset to start
-        sine_position = 0;
-    }
+void init_pwm(int pin_slice, int sine_table_length) {
+    pwm_config config = pwm_get_default_config();
+    // it is convenient to set wrap = 2*length
+    int wrap = 2*sine_table_length;
+    pwm_config_set_clkdiv(&config, 1.0); 
+    pwm_config_set_wrap(&config, wrap); 
+    pwm_init(pin_slice, &config, true);
 }
 
-/*
- * code that core 1 will run
- *
- * generates a sine wave using pwm
- */
-void generate_sine_wave(uint32_t sine_frequency) {
-    // initialize pwm pin
-    gpio_set_function(INPUT_SIGNAL_PIN, GPIO_FUNC_PWM);
-    
-    int pin_slice = pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN);
+void init_pwm_dma(int pwm_dma_channel, int reset_dma_channel, int pwm_pin_slice, uint32_t * sine_table, uint32_t ** sine_table_pointer, int sine_table_length) {
+    dma_channel_config pwm_dma_channel_config = dma_channel_get_default_config(pwm_dma_channel);
+    dma_channel_config reset_dma_channel_config = dma_channel_get_default_config(reset_dma_channel);
 
-    // Setup PWM interrupt to fire when PWM cycle is complete
-    pwm_clear_irq(pin_slice);
-    pwm_set_irq_enabled(pin_slice, true);
-    // use interrupt handler function defined above
-    irq_set_exclusive_handler(PWM_IRQ_WRAP, pwm_interrupt_handler); 
-    irq_set_enabled(PWM_IRQ_WRAP, true);
+    channel_config_set_transfer_data_size(&pwm_dma_channel_config, DMA_SIZE_32);
+    // reading entries from a sine_table
+    channel_config_set_read_increment(&pwm_dma_channel_config, true);
+    // always writes to the same place
+    channel_config_set_write_increment(&pwm_dma_channel_config, false);
+    // pace with the pwm signal
+    channel_config_set_dreq(&pwm_dma_channel_config, DREQ_PWM_WRAP0 + pwm_pin_slice);
+    // when done, start the reset dma channel
+    channel_config_set_chain_to(&pwm_dma_channel_config, reset_dma_channel);
 
-    // initialize pwm config: clock division and wrap
-    pwm_config config = pwm_get_default_config();
-    float clkdiv = CLK_KHZ * KHZ_TO_HZ / (WRAP * (SINE_TABLE_LENGTH<<SAMPLE_RATE_FACTOR_SHIFT) * sine_frequency);
-    pwm_config_set_clkdiv(&config, clkdiv); 
-    pwm_config_set_wrap(&config, WRAP); 
-    pwm_init(pin_slice, &config, true);
+    channel_config_set_transfer_data_size(&reset_dma_channel_config, DMA_SIZE_32);
+    // only performing one read
+    channel_config_set_read_increment(&reset_dma_channel_config, false);
+    // only performing one write
+    channel_config_set_write_increment(&reset_dma_channel_config, false);
+    // when done, start the pwm dma channel
+    channel_config_set_chain_to(&reset_dma_channel_config, pwm_dma_channel);
 
-    // set initial pwm level
-    pwm_set_gpio_level(INPUT_SIGNAL_PIN, 0);
-
-    while(1) {
-        __wfi(); // Wait for Interrupt
-    }
+    dma_channel_configure(
+        pwm_dma_channel,
+        &pwm_dma_channel_config,
+        // write address: pwm counter compare register
+        &pwm_hw->slice[pwm_pin_slice].cc,
+        // read address: the provided sine_table
+        sine_table,
+        // number of transfers: the length of the sine_table
+        sine_table_length,
+        // don't start immediately
+        false
+    );
+    dma_channel_configure(
+        reset_dma_channel,
+        &reset_dma_channel_config,
+        // write address: the pwm dma channel's read address
+        &dma_hw->ch[pwm_dma_channel].read_addr,
+        // read address: the pointer to the pointer to the first entry in the given sine_table
+        sine_table_pointer,
+        // number of transfers: one (just resetting the pwm dma channel)
+        1,
+        // don't start immediately
+        false
+    );
 }
