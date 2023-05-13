@@ -63,32 +63,6 @@ uint32_t output_period[NUM_SAMPLES_PER_PERIOD];
 char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
 double sine_period[1000];
 
-/// @brief creates an table whose entries are the pwm counter compare level corresponding to the appropriate sine function value
-/// @param length the length of the table
-/// @param amplitude desired amplitude of the sine wave
-/// @return the sine table
-uint32_t * generate_sine_table(int length, double amplitude) {
-    uint32_t * sine_table = malloc(length*sizeof(uint32_t));
-
-    for (int i = 0; i < length; i++) {
-        // "duty cycle" is the same thing as the pwm counter compare level in this case
-        uint32_t duty_cycle = (uint32_t) round(length*((2*amplitude/VDD)*sin(2 * PI * i / length) + 1));
-        sine_table[i] = duty_cycle;
-    }
-
-    return sine_table;
-}
-
-/// @brief calculates the length of the sine table that produces a sine wave of the given frequency when the pwm clkdiv is set to 1.0
-/// @param frequency the sine wave frequency
-/// @return sine table length
-int highest_frequency_to_table_length(float frequency) {
-    // the following comes from the fact that
-    //      f_sine = f_clk / (wrap * length * clkdiv)
-    // where we assume wrap = 2*length and clkdiv = 1
-    return (int) round(sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * frequency)));
-}
-
 float read_frequency_from_serial() {
     float frequency = 0;
     int16_t character;
