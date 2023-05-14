@@ -125,6 +125,87 @@ void print_samples(uint8_t samples[], char samples_string[]) {
     printf(samples_string);
 }
 
+void measure_vin_vout_initial(
+    double frequency,
+    double amplitude,
+    int pwm_pin,
+    int pwm_dma_channel,
+    int reset_dma_channel,
+    int adc_dma_channel
+) {
+    // get sine table given frequency
+    sine_table_length = highest_frequency_to_table_length(frequency);
+    sine_table = generate_sine_table(sine_table_length, amplitude);
+    sine_table_pointer = &sine_table;
+
+    // initialize adc and the adc dma channel
+    init_adc(frequency);
+    init_adc_dma(adc_dma_channel, samples);
+
+    // initialize pwm pin
+    gpio_set_function(pwm_pin, GPIO_FUNC_PWM);
+
+    // initialize pwm and the pwm dma channels
+    int pwm_pin_slice = pwm_gpio_to_slice_num(pwm_pin);
+    init_pwm(pwm_pin_slice, sine_table_length);
+    init_pwm_dma(pwm_dma_channel, reset_dma_channel, pwm_pin_slice, sine_table, sine_table_pointer, sine_table_length);
+
+    // start the pwm dma channels
+    dma_channel_start(pwm_dma_channel);
+    // wait for steady state
+    sleep_ms(1000);
+
+    sample_signals(adc_dma_channel);
+
+    average_period(samples, input_period, output_period, periods_string);
+    printf(periods_string);
+}
+
+void measure_vin_vout_subsequent(
+    double frequency,
+    double amplitude,
+    int pwm_pin,
+    int pwm_dma_channel,
+    int reset_dma_channel,
+    int adc_dma_channel
+) {
+    // reset adc dma channel
+    dma_channel_set_write_addr(adc_dma_channel, samples, false);
+
+    // sample frequency must be twice as fast because we're sampling 2 signals
+    float sample_frequency = 2*NUM_SAMPLES_PER_PERIOD * frequency;
+    adc_set_clkdiv(ADC_CLOCK_FREQUENCY_HZ / sample_frequency);
+
+    int pwm_pin_slice = pwm_gpio_to_slice_num(pwm_pin);
+
+    // pause current running pwm (and thus also pwm dma channels)
+    pwm_set_enabled(pwm_pin_slice, false);
+
+    // generate new sine table
+    free(sine_table);
+    sine_table_length = highest_frequency_to_table_length(frequency);
+    sine_table = generate_sine_table(sine_table_length, amplitude);
+    sine_table_pointer = &sine_table;
+
+    // re-init pwm with new parameters
+    init_pwm(pwm_pin_slice, sine_table_length);
+
+    // reconfigure pwm dma stuff
+    dma_channel_set_read_addr(pwm_dma_channel, sine_table, false);
+    dma_channel_set_trans_count(pwm_dma_channel, sine_table_length, false);
+    dma_channel_set_read_addr(reset_dma_channel, sine_table_pointer, false);
+    // resume pwm (and thus pwm dma channels)
+    pwm_set_enabled(pwm_pin_slice, true);
+    // wait for steady state
+    sleep_ms(1000);
+
+    sample_signals(adc_dma_channel);
+
+    average_period(samples, input_period, output_period, periods_string);
+    printf(periods_string);
+        
+}
+
 int main(void) {
     stdio_init_all();
     init_i2c();
@@ -136,42 +217,17 @@ int main(void) {
     //float sine_frequency = read_frequency_from_serial();
     float sine_frequency = 1000.0;
 
-    // get sine table given frequency
-    sine_table_length = highest_frequency_to_table_length(sine_frequency);
-    sine_table = generate_sine_table(sine_table_length, AMPLITUDE);
-    sine_table_pointer = &sine_table;
-
     // get some dma channels we can use
     int pwm_dma_channel = dma_claim_unused_channel(true);
     int reset_dma_channel = dma_claim_unused_channel(true);
     int adc_dma_channel = dma_claim_unused_channel(true);
 
-    // initialize adc and the adc dma channel
-    init_adc(sine_frequency);
-    init_adc_dma(adc_dma_channel, samples);
-
-    // initialize pwm pin
-    gpio_set_function(INPUT_SIGNAL_PIN, GPIO_FUNC_PWM);
-
-    // initialize pwm and the pwm dma channels
-    int pwm_pin_slice = pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN);
-    init_pwm(pwm_pin_slice, sine_table_length);
-    init_pwm_dma(pwm_dma_channel, reset_dma_channel, pwm_pin_slice, sine_table, sine_table_pointer, sine_table_length);
-
-    // start the pwm dma channels
-    dma_channel_start(pwm_dma_channel);
-    // wait for steady state
-    sleep_ms(1000);
-
-    sample_signals(adc_dma_channel);
+    measure_vin_vout_initial(sine_frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
 
     // for (int i = 0; i < TOTAL_NUM_SAMPLES; i += 2) {
     //     printf("%d,", samples[i]);
     // }
     //print_samples(samples, samples_string);
-    average_period(samples, input_period, output_period, periods_string);
-    printf(periods_string);
-    
     if (true) {
         get_temperature_and_pressure(&temperature, &pressure);
         printf("%.3f\n", temperature);
@@ -180,46 +236,16 @@ int main(void) {
     }
 
     while (true) {
-        // reset adc dma channel
-        dma_channel_set_write_addr(adc_dma_channel, samples, false);
-
         // read in new sine frequency
         //sine_frequency = read_frequency_from_serial();
         sine_frequency = sine_frequency + 100;
-        // sample frequency must be twice as fast because we're sampling 2 signals
-        float sample_frequency = 2*NUM_SAMPLES_PER_PERIOD * sine_frequency;
-        adc_set_clkdiv(ADC_CLOCK_FREQUENCY_HZ / sample_frequency);
 
-        // pause current running pwm (and thus also pwm dma channels)
-        pwm_set_enabled(pwm_pin_slice, false);
-
-        // generate new sine table
-        free(sine_table);
-        sine_table_length = highest_frequency_to_table_length(sine_frequency);
-        sine_table = generate_sine_table(sine_table_length, AMPLITUDE);
-        sine_table_pointer = &sine_table;
-
-        // re-init pwm with new parameters
-        init_pwm(pwm_pin_slice, sine_table_length);
-
-        // reconfigure pwm dma stuff
-        dma_channel_set_read_addr(pwm_dma_channel, sine_table, false);
-        dma_channel_set_trans_count(pwm_dma_channel, sine_table_length, false);
-        dma_channel_set_read_addr(reset_dma_channel, sine_table_pointer, false);
-        // resume pwm (and thus pwm dma channels)
-        pwm_set_enabled(pwm_pin_slice, true);
-        // wait for steady state
-        sleep_ms(1000);
-
-        sample_signals(adc_dma_channel);
+        measure_vin_vout_subsequent(sine_frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
 
         // for (int i = 0; i < TOTAL_NUM_SAMPLES; i += 2) {
         //     printf("%d,", samples[i]);
         // }
         //print_samples(samples, samples_string);
-        average_period(samples, input_period, output_period, periods_string);
-        printf(periods_string);
-        
         if (true) {
             get_temperature_and_pressure(&temperature, &pressure);
             printf("%.3f\n", temperature);
