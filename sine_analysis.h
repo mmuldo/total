@@ -21,5 +21,7 @@ typedef struct {
 
 uint32_t * generate_sine_table(int length, double amplitude);
 int highest_frequency_to_table_length(float frequency);
+void average_period(uint8_t samples[], uint8_t input_period[], uint8_t output_period[], int num_samples_per_period, int num_periods);
+void samples_to_voltages(uint8_t samples[], double voltages[], int num_samples);
 sine characterize(double sine_period[], double frequency, int num_samples);
 complex impedence(sine vin, sine vout, double Rf);

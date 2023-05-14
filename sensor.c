@@ -58,8 +58,10 @@ uint8_t samples[TOTAL_NUM_SAMPLES];
 // for printing to serial i/o
 char samples_string[TOTAL_NUM_SAMPLES+1];
 
-uint32_t input_period[NUM_SAMPLES_PER_PERIOD];
-uint32_t output_period[NUM_SAMPLES_PER_PERIOD];
+uint8_t input_period[NUM_SAMPLES_PER_PERIOD];
+uint8_t output_period[NUM_SAMPLES_PER_PERIOD];
+double vin[NUM_SAMPLES_PER_PERIOD];
+double vout[NUM_SAMPLES_PER_PERIOD];
 char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
 double sine_period[1000];
 
@@ -76,38 +78,6 @@ float read_frequency_from_serial() {
     }
 
     return frequency;
-}
-
-void average_period(uint8_t samples[], uint32_t input_period[], uint32_t output_period[], char periods_string[]) {
-    // clear buffers
-    for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
-        input_period[j] = 0;
-        output_period[j] = 0;
-    }
-    
-    // sum over all periods
-    for (int i = 0; i < NUM_PERIODS; i++) {
-        for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
-            input_period[j] = input_period[j] + samples[2*(NUM_SAMPLES_PER_PERIOD*i + j)];
-            output_period[j] = output_period[j] + samples[2*(NUM_SAMPLES_PER_PERIOD*i + j) + 1];
-        }
-    }
-    
-    // average over all periods
-    for (int j = 0; j < NUM_SAMPLES_PER_PERIOD; j++) {
-        periods_string[j] = (int) round((float) input_period[j] / NUM_PERIODS);
-        periods_string[NUM_SAMPLES_PER_PERIOD + j] = (int) round((float) output_period[j] / NUM_PERIODS);
-    }
-    
-    // ensure none are '\0' (would end string)
-    for (int k = 0; k < 2*NUM_SAMPLES_PER_PERIOD; k++) {
-        if (periods_string[k] == 0) {
-            periods_string[k] = 1;
-        }
-    }
-    
-    // end string
-    periods_string[2*NUM_SAMPLES_PER_PERIOD] = '\0';
 }
 
 void print_samples(uint8_t samples[], char samples_string[]) {
@@ -157,7 +127,7 @@ void measure_vin_vout_initial(
 
     sample_signals(adc_dma_channel);
 
-    average_period(samples, input_period, output_period, periods_string);
+    average_period(samples, input_period, output_period, NUM_SAMPLES_PER_PERIOD, NUM_PERIODS);
     printf(periods_string);
 }
 
@@ -201,7 +171,7 @@ void measure_vin_vout_subsequent(
 
     sample_signals(adc_dma_channel);
 
-    average_period(samples, input_period, output_period, periods_string);
+    average_period(samples, input_period, output_period, NUM_SAMPLES_PER_PERIOD, NUM_PERIODS);
     printf(periods_string);
         
 }
@@ -222,7 +192,10 @@ int main(void) {
     int reset_dma_channel = dma_claim_unused_channel(true);
     int adc_dma_channel = dma_claim_unused_channel(true);
 
+    sine s;
     measure_vin_vout_initial(sine_frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+    samples_to_voltages(input_period, vin, NUM_SAMPLES_PER_PERIOD);
+    s = characterize(vin, sine_frequency, NUM_SAMPLES_PER_PERIOD);
 
     // for (int i = 0; i < TOTAL_NUM_SAMPLES; i += 2) {
     //     printf("%d,", samples[i]);
@@ -241,6 +214,8 @@ int main(void) {
         sine_frequency = sine_frequency + 100;
 
         measure_vin_vout_subsequent(sine_frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+        samples_to_voltages(input_period, vin, NUM_SAMPLES_PER_PERIOD);
+        s = characterize(vin, sine_frequency, NUM_SAMPLES_PER_PERIOD);
 
         // for (int i = 0; i < TOTAL_NUM_SAMPLES; i += 2) {
         //     printf("%d,", samples[i]);
