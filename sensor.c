@@ -73,12 +73,12 @@ double vout[NUM_SAMPLES_PER_PERIOD];
 char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
 double sine_period[1000];
 
-float read_frequency_from_serial() {
-    float frequency = 0;
+double read_frequency_from_serial() {
+    double frequency = 0;
     int16_t character;
     
     character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
-    while(character != '\n') {
+    while(character != ',') {
         if (character != PICO_ERROR_TIMEOUT) {
             frequency = 10*frequency + character - '0';
         }
@@ -88,19 +88,21 @@ float read_frequency_from_serial() {
     return frequency;
 }
 
-void print_samples(uint8_t samples[], char samples_string[]) {
-    // copy samples over
-    for (int i = 0; i < TOTAL_NUM_SAMPLES; i++) {
-        if (samples[i] == 0) {
-            samples_string[i] = 1;
-        } else {
-            samples_string[i] = samples[i];
-        }
-    }
-    // append string terminator
-    samples_string[TOTAL_NUM_SAMPLES] = '\0';
+double read_amplitude_from_serial() {
+    double amplitude = 0;
+    double order = 10;
+    int16_t character;
 
-    printf(samples_string);
+    character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    while(character != ',') {
+        if (character != PICO_ERROR_TIMEOUT && character != '.') {
+            amplitude = 10*amplitude + character - '0';
+            order /= 10;
+        }
+        character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    }
+
+    return amplitude * order;
 }
 
 void measure_vin_vout_initial(
@@ -256,7 +258,12 @@ void print_impedence_spectrum(
 }
 
 int main(void) {
+    int16_t command;
+    double frequency;
+    double amplitude;
+
     stdio_init_all();
+
     set_sys_clock_khz(CLK_KHZ, true);
     init_i2c();
 
@@ -266,19 +273,24 @@ int main(void) {
     int adc_dma_channel = dma_claim_unused_channel(true);
 
     // do a dummy run, just to get things initialized
-    float sine_frequency = 1000.0;
-    measure_vin_vout_initial(sine_frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+    frequency = 1000.0;
+    measure_vin_vout_initial(frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
 
     while (true) {
-        if (false) {
-            print_temperature_and_pressure();
-        } else if (true) {
-            print_impedence_spectrum(frequencies_for_spectroscopy, NUM_FREQUENCIES_FOR_SPECTROSCOPY, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
-        } else {
-            // read in new sine frequency
-            //sine_frequency = read_frequency_from_serial();
-            sine_frequency = sine_frequency + 100;
-            print_vin_vout_single_frequency(sine_frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+        command = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+        switch (command) {
+            case 't':
+                print_temperature_and_pressure();
+                break;
+            case 's':
+                amplitude = read_amplitude_from_serial();
+                print_impedence_spectrum(frequencies_for_spectroscopy, NUM_FREQUENCIES_FOR_SPECTROSCOPY, amplitude, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+                break;
+            case 'f':
+                frequency = read_frequency_from_serial();
+                amplitude = read_amplitude_from_serial();
+                print_vin_vout_single_frequency(frequency, amplitude, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+                break;
         }
     }
 }

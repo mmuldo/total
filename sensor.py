@@ -9,14 +9,15 @@ import numpy as np
 from typing import Any, Optional
 import csv
 from pathlib import Path
+from dataclasses import dataclass
 
 # rate at which information is transferred over serial port
 BAUDRATE = 115200
 
 # minimum frequency at which sensor can measure impedence
-MIN_FREQ_HZ = 1000
+MIN_FREQ_HZ = 100
 # maximum frequency at which sensor can measure impedence
-MAX_FREQ_HZ = 9999
+MAX_FREQ_HZ = 10000
 
 # these should match the values in conductivity.c
 # number of periods coming from serial i/o
@@ -57,6 +58,7 @@ def get_args() -> tuple[int, str, bool, str]:
     output_file = ''
     plot = False
     plot_file = ''
+    amplitude = 0.6
 
     i = 0
     while i < len(sys.argv):
@@ -70,9 +72,12 @@ def get_args() -> tuple[int, str, bool, str]:
         elif sys.argv[i] == '--plot-file':
             plot_file = sys.argv[i+1]
             i += 1
+        elif sys.argv[i] == '--amplitude':
+            amplitude = float(sys.argv[i+1])
+            i += 1
         i += 1
 
-    return frequency, output_file, plot, plot_file
+    return frequency, output_file, plot, plot_file, amplitude
 
 def format_impedence(impedence: complex) -> str:
     '''
@@ -154,67 +159,110 @@ def plot(
     if show_plot: plt.show()
     plt.close()
 
-
-def impedence_dot_product(
-    sin_input: np.ndarray,
-    sin_output: np.ndarray,
-    Rf: float = 1,
-    offset: float = 0
-) -> complex:
-    '''
-    calculates the impedence given the input and output signals using a dot
-    product approximation.
-
-    with the circuit we have, the impedence is given by:
-        Z = -Rf(|Vin|/|Vout|)exp(-j phase_shift)
-    where Z is the complex impedence in phaser form, Rf is the resistor used
-    in the transimpdence amplifier, |Vin| is the magnitude of the Vin sine wave,
-    |Vout| is the magnitude of the |Vout| sine wave, and phase_shift is the
-    difference in phase between Vin and Vout.
-
-    the inner product between two sines is defined as:
-        <sin1, sin2> = Integral from -Pi to Pi of (sine1 * sine2)
-    this can be approximated as a reimann sum, which ends up just being the
-    vector dot product of the sampled version of the two sines, enabling the
-    techniques used in this function.
-
-    Parameters
-    ----------
-    sin_input : np.ndarray
-        signal being fed into the impedence that is being sensed
-    sin_output : np.ndarray
-        output signal from the impedence that is being sensed
-    Rf : float
-        value of the resistor used in the transimpedence amplifier, in ohms
+@dataclass
+class Sine:
+    amplitude : float
+    frequency : float
+    phase : float
     offset : float
-        the dc offset from zero of the two signals, in volts
 
-    Returns
-    -------
-    complex
-        complex impedance in cartesian form
-    '''
-    # remove the dc offset
-    sin_input_offset = sin_input - offset
-    sin_output_offset = sin_output - offset
+def characterize(period, frequency):
+    dt = 1/(frequency*len(period))
 
-    # amplitude gain/loss
-    mag_impedence = Rf*np.linalg.norm(sin_input_offset)/np.linalg.norm(sin_output_offset)
-    # phase shift
-    phase_impedence = np.arccos(
-        np.dot(sin_input_offset, sin_output_offset) / (
-            np.linalg.norm(sin_input_offset) * np.linalg.norm(sin_output_offset)
-        )
-    ) + np.pi
+    i_min = np.argmin(period)
+    v_min = np.min(period)
+    i_max = np.argmax(period)
+    v_max = np.max(period)
 
-    # resistance
-    R = mag_impedence * np.cos(phase_impedence)
-    # reactance
-    X = mag_impedence * np.sin(phase_impedence)
-    return R + X*1j
-        
+    offset = (v_max + v_min) / 2
+    amplitude = v_max - offset
+    phase = np.pi/2 - 2*np.pi*frequency*i_max*dt
+
+    return Sine(amplitude,frequency,phase,offset)
+
+def impedence(vin, vout, frequency, Rf):
+    vin_sine = characterize(vin, frequency)
+    vout_sine = characterize(vout, frequency)
+
+    magnitude = Rf*vin_sine.amplitude/vout_sine.amplitude
+    phase = vin_sine.phase - vout_sine.phase + np.pi
+
+    R = magnitude*np.cos(phase)
+    X = magnitude*np.sin(phase)
+
+    return R+1j*X
+
+def get_impedence_single_frequency(
+    frequency: int,
+    amplitude: float,
+    ser: serial.Serial,
+    show_plot: bool = False,
+):
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+
+    ser.write(f'f{frequency},{amplitude},'.encode('utf-8'))
+
+    while ser.in_waiting < 2*NUM_SAMPLES_PER_PERIOD : pass
+
+    samples = [sample for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)]
+    samples = 3.3/((1<<8)-1) * np.array(samples)
+
+    vin = samples[:NUM_SAMPLES_PER_PERIOD]
+    vout = samples[NUM_SAMPLES_PER_PERIOD:]
+
+    Z = impedence(vin, vout, frequency, Rf=TIA_RF)
+
+    plot(vin, vout, frequency, Z, show_plot)
+
+    return Z
+
+def get_impedence_spectrum(
+    amplitude: float,
+    ser: serial.Serial,
+):
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+
+    ser.write(f's{amplitude},'.encode('utf-8'))
+
+    prev_in_waiting = 0
+    while ser.in_waiting == 0: pass
+    while ser.in_waiting != prev_in_waiting:
+        prev_in_waiting = ser.in_waiting
+        time.sleep(0.001)
+
+    from_serial = ser.read_until(size=ser.in_waiting).decode('utf-8')
+    samples0 = [sample for sample in from_serial.split(',')]
+    samples = np.array([float(sample) for sample in samples0])
+    freqs = [100, 300, 500, 700, 900, 1000, 3000, 5000, 7000, 9000]
+    mags = samples[:10]
+    phases = samples[10:]
+    phases = np.array([phase if phase < np.pi else phase - 2*np.pi for phase in phases])
+
+    plt.loglog(freqs, mags)
+    plt.show()
+    plt.plot(freqs, phases)
+    plt.xscale('log')
+    plt.show()
+
+def get_temperature_and_pressure(
+    ser: serial.Serial,
+):
+    # make sure nothing is on the channel
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+
+    ser.write(f't'.encode('utf-8'))
+
+    while ser.in_waiting < 11 : pass
+    temperature, pressure = ser.read_until(size=11).decode('utf-8').split(',')
+
+    return float(temperature), float(pressure)
+
 def get_measurements(
     frequency: int,
+    amplitude: float,
     ser: serial.Serial,
     output_file: str = '',
     show_plot: bool = False,
@@ -267,7 +315,7 @@ def get_measurements(
     samples = []        
     #while ser.in_waiting > 0:
     samples += [sample for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)]
-    samples = 3.3/((1<<8)-1) * np.array(samples) - 1.65
+    samples = 3.3/((1<<8)-1) * np.array(samples)
 
     # assume samples for conductivity measurement are the first portion of readings
     #samples = np.array(readings)
@@ -313,7 +361,7 @@ def get_measurements(
     return impedence, temperature, pressure
 
 def main():
-    frequency, output_file, show_plot, plot_file = get_args()
+    frequency, output_file, show_plot, plot_file, amplitude = get_args()
 
     if frequency > MAX_FREQ_HZ or frequency < MIN_FREQ_HZ:
         # if frequency invalid, exit
@@ -324,11 +372,14 @@ def main():
     ser = serialio.init_serial()
 
     # get measurement
-    impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
+    #impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
+    #impedence = get_impedence_single_frequency(frequency, amplitude, ser, show_plot)
+    #temperature, pressure = get_temperature_and_pressure(ser)
+    get_impedence_spectrum(amplitude, ser)
 
-    print(f'Impedence: {format_impedence(impedence)} Ohms')
-    print(f'Temperature: {temperature} C')
-    print(f'Pressure: {pressure} mBars')
+    #print(f'Impedence: {format_impedence(impedence)} Ohms')
+    #print(f'Temperature: {temperature} C')
+    #print(f'Pressure: {pressure} mBars')
 
 if __name__ == '__main__':
     main()
