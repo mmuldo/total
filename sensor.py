@@ -373,11 +373,11 @@ def main():
 
     # get measurement
     #impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
-    #impedence = get_impedence_single_frequency(frequency, amplitude, ser, show_plot)
+    impedence = get_impedence_single_frequency(frequency, amplitude, ser, show_plot)
     #temperature, pressure = get_temperature_and_pressure(ser)
-    get_impedence_spectrum(amplitude, ser)
+    #get_impedence_spectrum(amplitude, ser)
 
-    #print(f'Impedence: {format_impedence(impedence)} Ohms')
+    print(f'Impedence: {format_impedence(impedence)} Ohms')
     #print(f'Temperature: {temperature} C')
     #print(f'Pressure: {pressure} mBars')
 

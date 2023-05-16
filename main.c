@@ -10,8 +10,7 @@
 #include "hardware/gpio.h"
 
 #include "i2c.h"
-#include "linalg.h"
-#include "sine_analysis.h"
+#include "sine.h"
 #include "adc.h"
 #include "pwm.h"
 

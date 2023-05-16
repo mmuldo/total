@@ -3,91 +3,106 @@
 #include <string.h>
 #include <math.h>
 
-#include "pico/stdlib.h"   
-#include "pico/multicore.h"
-#include "hardware/irq.h"  
-#include "hardware/pwm.h"  
-#include "hardware/sync.h" 
-#include "hardware/gpio.h"
-
 #include "sine.h"
+#include "adc.h"
 
-// buffer holding sine table
-int *sine_table;
+/// @brief creates an table whose entries are the pwm counter compare level corresponding to the appropriate sine function value
+/// @param length the length of the table
+/// @param amplitude desired amplitude of the sine wave
+/// @return the sine table
+uint32_t * generate_sine_table(int length, double amplitude) {
+    uint32_t * sine_table = malloc(length*sizeof(uint32_t));
 
-// length of sine table
-int l;
-
-// initialize sine table index
-int sine_position = 0;
-
-int duty_cycle(int index, int length, double amplitude) {
-    return (int) round(length*((amplitude/VDD)*sin(2 * PI * index / length) + 1));
-}
-
-int length(int frequency) {
-    return (int) sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * frequency << SAMPLE_RATE_FACTOR_SHIFT));
-}
-
-/*
- * PWM Interrupt Handler which outputs PWM level and advances the 
- * current sample. 
- * 
- * We repeat the same value for 2^SAMPLE_RATE_FACTOR_SHIFT cycles. This means 
- * the sample rate is adjusted by factor of 2^SAMPLE_RATE_FACTOR_SHIFT.
- */
-void pwm_interrupt_handler() {
-    // clear interrupt flag
-    pwm_clear_irq(pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN));    
-
-    if (sine_position < (l<<SAMPLE_RATE_FACTOR_SHIFT) - 1) { 
-        // set pwm level 
-        pwm_set_gpio_level(INPUT_SIGNAL_PIN, sine_table[sine_position>>SAMPLE_RATE_FACTOR_SHIFT]);  
-        sine_position++;
-    } else {
-        // reset to start
-        sine_position = 0;
-    }
-}
-
-/*
- * code that core 1 will run
- *
- * generates a sine wave using pwm
- */
-void generate_sine_wave(uint32_t sine_frequency) {
-    l = length(sine_frequency);
-    sine_table = malloc(l*sizeof(int));
-
-    // generate sine table
-    for (int i = 0; i < l; i++) {
-        sine_table[i] = duty_cycle(i, l, AMPLITUDE);
+    for (int i = 0; i < length; i++) {
+        // "duty cycle" is the same thing as the pwm counter compare level in this case
+        uint32_t duty_cycle = (uint32_t) round(length*((2*amplitude/VDD)*sin(2 * PI * i / length) + 1));
+        sine_table[i] = duty_cycle;
     }
 
-    // initialize pwm pin
-    gpio_set_function(INPUT_SIGNAL_PIN, GPIO_FUNC_PWM);
+    return sine_table;
+}
+
+/// @brief calculates the length of the sine table that produces a sine wave of the given frequency when the pwm clkdiv is set to 1.0
+/// @param frequency the sine wave frequency
+/// @return sine table length
+int highest_frequency_to_table_length(float frequency) {
+    // the following comes from the fact that
+    //      f_sine = f_clk / (wrap * length * clkdiv)
+    // where we assume wrap = 2*length and clkdiv = 1
+    return (int) round(sqrt(CLK_KHZ * KHZ_TO_HZ / (2 * frequency)));
+}
+
+void average_period(uint8_t samples[], uint8_t input_period[], uint8_t output_period[], int num_samples_per_period, int num_periods) {
+    // clear buffers
+    for (int j = 0; j < num_samples_per_period; j++) {
+        input_period[j] = 0;
+        output_period[j] = 0;
+    }
     
-    int pin_slice = pwm_gpio_to_slice_num(INPUT_SIGNAL_PIN);
+    int sum_input;
+    int sum_output;
+    // average over all periods
+    for (int j = 0; j < num_samples_per_period; j++) {
+        sum_input = 0;
+        sum_output = 0;
 
-    // Setup PWM interrupt to fire when PWM cycle is complete
-    pwm_clear_irq(pin_slice);
-    pwm_set_irq_enabled(pin_slice, true);
-    // use interrupt handler function defined above
-    irq_set_exclusive_handler(PWM_IRQ_WRAP, pwm_interrupt_handler); 
-    irq_set_enabled(PWM_IRQ_WRAP, true);
+        for (int i = 0; i < num_periods; i++) {
+            sum_input = sum_input + samples[2*(num_samples_per_period*i + j)];
+            sum_output = sum_output + samples[2*(num_samples_per_period*i + j) + 1];
+        }
 
-    // initialize pwm config: clock division and wrap
-    pwm_config config = pwm_get_default_config();
-    pwm_config_set_clkdiv(&config, 1.0); 
-    pwm_config_set_wrap(&config, 2*l); 
-    pwm_init(pin_slice, &config, true);
+        input_period[j] = (uint8_t) round((float) sum_input / num_periods);
+        output_period[j] = (uint8_t) round((float) sum_output / num_periods);
+    }
+}
 
-    // set initial pwm level
-    pwm_set_gpio_level(INPUT_SIGNAL_PIN, 0);
+void samples_to_voltages(uint8_t samples[], double voltages[], int num_samples) {
+    for (int i = 0; i < num_samples; i++) {
+        voltages[i] = ADC_CONVERT * samples[i];
+    }
+}
 
-    while(1) {
-        __wfi(); // Wait for Interrupt
+sine characterize(double sine_period[], double frequency, int num_samples) {
+    sine s;
+    double amplitude;
+    double phase;
+    double offset;
+
+    double dt = 1/(frequency * num_samples);
+    int i_max = 0;
+    double value_max = sine_period[0];
+    int i_min = 0;
+    double value_min = sine_period[0];
+
+    for (int i = 0; i < num_samples; i++) {
+        if (sine_period[i] > value_max) {
+            i_max = i;
+            value_max = sine_period[i];
+        }
+
+        if (sine_period[i] < value_min) {
+            i_min = i;
+            value_min = sine_period[i];
+        }
     }
 
-    free(sine_table);
+    offset = (value_max + value_min) / 2;
+    amplitude = value_max - offset;
+    phase = PI/2 - 2*PI*frequency*i_max*dt;
+
+    s.amplitude = amplitude;
+    s.frequency = frequency;
+    s.phase = phase;
+    s.offset = offset;
+
+    return s;
+}
+
+complex impedence(sine vin, sine vout, double Rf) {
+    complex Z;
+
+    Z.magnitude = Rf*vin.amplitude/vout.amplitude;
+    Z.phase = vin.phase - vout.phase + PI;
+
+    return Z;
 }

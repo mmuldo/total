@@ -1,7 +1,0 @@
-#define SINE_TABLE_LENGTH {{ length }}
-
-uint8_t SINE_TABLE[] = {
-    {% for sample in table %}
-    {{ sample }},
-    {% endfor %}
-};
