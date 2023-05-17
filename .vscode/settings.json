@@ -18,5 +18,6 @@
     },
     "cmake.buildBeforeRun": true,
     "cmake.configureArgs": ["-DCMAKE_BUILD_TYPE=Debug"],
-    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "cmake.sourceDirectory": "/home/matt/code/total/src/pico"
 }

@@ -5,8 +5,15 @@
 // saturation voltage in volts
 #define VDD 3.3
 
+// max adc reading
+#define ADC_RANGE (1 << 8)
+
+// multiply to convert adc reading to voltage
+#define ADC_CONVERT (VDD / (ADC_RANGE - 1))
+
 #define PI 3.1415926535
 
+/// @brief sine(t) = amplitude[V]*sin(2*pi*frequency[Hz]*t[s] + phase[radians]) + offset[V]
 typedef struct {
     double amplitude;
     double frequency;
@@ -14,6 +21,7 @@ typedef struct {
     double offset;
 } sine;
 
+/// @brief Z = magnitude[Ohms]*exp(j*phase[radians])
 typedef struct {
     double magnitude;
     double phase;

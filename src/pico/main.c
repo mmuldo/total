@@ -27,8 +27,6 @@
 // for calculating sine
 #define PI 3.1415926535
 
-#define AMPLITUDE 0.75
-
 // number of samples in one period of a sine wave
 #define NUM_SAMPLES_PER_PERIOD 25
 
@@ -36,47 +34,61 @@
 #define NUM_PERIODS 10
 
 // total number of samples that will be collected
-// NOTE: it appears that the maximum number of samples that can
-// be fed to the serial i/o at one time is 594, so if you don't
-// plan on reading the samples from serial i/o in chunks, then
-// don't let this constant exceed 594
 #define TOTAL_NUM_SAMPLES 2*NUM_PERIODS*(NUM_SAMPLES_PER_PERIOD)
 
 // frequency at which dedicated adc clock is running at
 #define ADC_CLOCK_FREQUENCY_HZ 48000000
 
+// arbitrarily long time to wait to receive characters over serial i/o
 #define SERIAL_IO_WAIT_TIME_US 5*60*1000000
 
-#define NUM_FREQUENCIES_FOR_SPECTROSCOPY 10
+// time to wait for waveforms to reach steady state
+#define STEADY_STATE_WAIT_TIME_MS 500
 
-#define RF 10000.0
+// value of feedback resistor in transimpedence amplifier (in Ohms)
+#define RF_OHMS 10000.0
 
-double frequencies_for_spectroscopy[] = {100, 300, 500, 700, 900, 1000, 3000, 5000, 7000, 9000};
-double magnitude_spectrum[10];
-double phase_spectrum[10];
+// number of frequencies to test impedence on during spectroscopy
+#define NUM_FREQUENCIES_FOR_SPECTROSCOPY 19
 
-// global pointer to sine_table (needs to be global so that dma channels have access)
+// frequencies to test impedence on during spectroscopy
+double FREQUENCIES_FOR_SPECTROSCOPY[] = {
+    100,
+    200,
+    300,
+    400,
+    500,
+    600,
+    700,
+    800,
+    900,
+    1000,
+    2000,
+    3000,
+    4000,
+    5000,
+    6000,
+    7000,
+    8000,
+    9000,
+    10000
+};
+
+// buffer for storing one period of a sine wave; values are pwm counter compare values
 uint32_t * sine_table;
+// pointer to sine_table (needs to be global so that dma channels have access)
 uint32_t ** sine_table_pointer;
 // sine table length also global just for consistency
 int sine_table_length;
-// buffer in which to collect samples
-uint8_t samples[TOTAL_NUM_SAMPLES];
-// for printing to serial i/o
-char samples_string[TOTAL_NUM_SAMPLES+1];
 
-uint8_t input_period[NUM_SAMPLES_PER_PERIOD];
-uint8_t output_period[NUM_SAMPLES_PER_PERIOD];
-double vin[NUM_SAMPLES_PER_PERIOD];
-double vout[NUM_SAMPLES_PER_PERIOD];
-char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
-double sine_period[1000];
-
+/// @brief reads an integer frequency from serial i/o
+/// @return the frequency that was read in
 double read_frequency_from_serial() {
     double frequency = 0;
     int16_t character;
     
     character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    // assume frequency will be terminated with a comma
     while(character != ',') {
         if (character != PICO_ERROR_TIMEOUT) {
             frequency = 10*frequency + character - '0';
@@ -87,12 +99,15 @@ double read_frequency_from_serial() {
     return frequency;
 }
 
+/// @brief reads an amplitude (0 < amplitude < 10) from serial i/o
+/// @return the amplitude that was read in
 double read_amplitude_from_serial() {
     double amplitude = 0;
     double order = 10;
     int16_t character;
 
     character = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
+    // assume amplitude will be terminated with a comma
     while(character != ',') {
         if (character != PICO_ERROR_TIMEOUT && character != '.') {
             amplitude = 10*amplitude + character - '0';
@@ -104,14 +119,28 @@ double read_amplitude_from_serial() {
     return amplitude * order;
 }
 
+/// @brief initializes peripherals and measures impedence by generating vin and vout signal and comparing them
+/// @param frequency the frequency of vin and vout
+/// @param amplitude the amplitude of vin
+/// @param pwm_pin the pin to generate the pwm signal (for vin) on
+/// @param pwm_dma_channel the dma channel for writing samples to the pwm counter compare register
+/// @param reset_dma_channel the dma channel for resetting the pwm dma channel
+/// @param adc_dma_channel the dma channel for moving adc samples to a buffer
+/// @param input_period buffer for storing one period of vin (adc samples)
+/// @param output_period buffer for storing one period of vout (adc samples)
 void measure_vin_vout_initial(
     double frequency,
     double amplitude,
     int pwm_pin,
     int pwm_dma_channel,
     int reset_dma_channel,
-    int adc_dma_channel
+    int adc_dma_channel,
+    uint8_t input_period[],
+    uint8_t output_period[]
 ) {
+    // buffer in which to collect samples
+    uint8_t samples[TOTAL_NUM_SAMPLES];
+
     // get sine table given frequency
     sine_table_length = highest_frequency_to_table_length(frequency);
     sine_table = generate_sine_table(sine_table_length, amplitude);
@@ -132,21 +161,35 @@ void measure_vin_vout_initial(
     // start the pwm dma channels
     dma_channel_start(pwm_dma_channel);
     // wait for steady state
-    sleep_ms(1000);
+    sleep_ms(STEADY_STATE_WAIT_TIME_MS);
 
     sample_signals(adc_dma_channel);
 
     average_period(samples, input_period, output_period, NUM_SAMPLES_PER_PERIOD, NUM_PERIODS);
 }
 
+/// @brief measures impedence by generating vin and vout signal and comparing them
+/// @param frequency the frequency of vin and vout
+/// @param amplitude the amplitude of vin
+/// @param pwm_pin the pin to generate the pwm signal (for vin) on
+/// @param pwm_dma_channel the dma channel for writing samples to the pwm counter compare register
+/// @param reset_dma_channel the dma channel for resetting the pwm dma channel
+/// @param adc_dma_channel the dma channel for moving adc samples to a buffer
+/// @param input_period buffer for storing one period of vin (adc samples)
+/// @param output_period buffer for storing one period of vout (adc samples)
 void measure_vin_vout_subsequent(
     double frequency,
     double amplitude,
     int pwm_pin,
     int pwm_dma_channel,
     int reset_dma_channel,
-    int adc_dma_channel
+    int adc_dma_channel,
+    uint8_t input_period[],
+    uint8_t output_period[]
 ) {
+    // buffer in which to collect samples
+    uint8_t samples[TOTAL_NUM_SAMPLES];
+    
     // reset adc dma channel
     dma_channel_set_write_addr(adc_dma_channel, samples, false);
 
@@ -175,32 +218,59 @@ void measure_vin_vout_subsequent(
     // resume pwm (and thus pwm dma channels)
     pwm_set_enabled(pwm_pin_slice, true);
     // wait for steady state
-    sleep_ms(1000);
+    sleep_ms(STEADY_STATE_WAIT_TIME_MS);
 
     sample_signals(adc_dma_channel);
 
     average_period(samples, input_period, output_period, NUM_SAMPLES_PER_PERIOD, NUM_PERIODS);
 }
 
+/// @brief measures temperature and pressure and prints them to serial i/o
 void print_temperature_and_pressure() {
     double temperature, pressure;
 
     get_temperature_and_pressure(&temperature, &pressure);
+    // send to serial i/o as "TEMP,PRES"
     printf("%.3f,", temperature);
     printf("%.3f", pressure);
 }
 
+/// @brief collects one period of vin and vout and prints them to serial i/o
+/// @param frequency the frequency of vin and vout
+/// @param amplitude the amplitude of vin
+/// @param pwm_pin the pin to generate the pwm signal (for vin) on
+/// @param pwm_dma_channel the dma channel for writing samples to the pwm counter compare register
+/// @param reset_dma_channel the dma channel for resetting the pwm dma channel
+/// @param adc_dma_channel the dma channel for moving adc samples to a buffer
+/// @param input_period buffer for storing one period of vin (adc samples)
+/// @param output_period buffer for storing one period of vout (adc samples)
 void print_vin_vout_single_frequency(
     double frequency,
     double amplitude,
     int pwm_pin,
     int pwm_dma_channel,
     int reset_dma_channel,
-    int adc_dma_channel
+    int adc_dma_channel,
+    uint8_t input_period[],
+    uint8_t output_period[]
 ) {
-    measure_vin_vout_subsequent(frequency, amplitude, pwm_pin, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+    // buffer to store all samples for printing to serial io
+    char periods_string[2*NUM_SAMPLES_PER_PERIOD+1];
 
-    // copy samples to buffer
+    measure_vin_vout_subsequent(
+        frequency,
+        amplitude,
+        pwm_pin,
+        pwm_dma_channel,
+        reset_dma_channel,
+        adc_dma_channel,
+        input_period,
+        output_period
+    );
+
+    // copy samples to buffer;
+    // since the adc takes 8-bit readings, and ASCII characters are encoded as
+    // 8-bit numbers, we can just print the samples directly
     for (int i = 0; i < NUM_SAMPLES_PER_PERIOD; i++) {
         periods_string[i] = input_period[i];
         periods_string[NUM_SAMPLES_PER_PERIOD + i] = output_period[i];
@@ -217,6 +287,16 @@ void print_vin_vout_single_frequency(
     printf(periods_string);
 }
 
+/// @brief measures impedence over a range of frequencies
+/// @param frequencies the frequencies to measure impedence at
+/// @param num_frequencies the number of frequencies to measure impedence at
+/// @param amplitude amplitude of vin
+/// @param pwm_pin the pin to generate the pwm signal (for vin) on
+/// @param pwm_dma_channel the dma channel for writing samples to the pwm counter compare register
+/// @param reset_dma_channel the dma channel for resetting the pwm dma channel
+/// @param adc_dma_channel the dma channel for moving adc samples to a buffer
+/// @param input_period buffer for storing one period of vin (adc samples)
+/// @param output_period buffer for storing one period of vout (adc samples)
 void print_impedence_spectrum(
     double frequencies[],
     int num_frequencies,
@@ -224,14 +304,36 @@ void print_impedence_spectrum(
     int pwm_pin,
     int pwm_dma_channel,
     int reset_dma_channel,
-    int adc_dma_channel
+    int adc_dma_channel,
+    uint8_t input_period[],
+    uint8_t output_period[]
 ) {
+    // buffer for storing one period of vin in V
+    double vin[NUM_SAMPLES_PER_PERIOD];
+    // buffer for storing one period of vout in V
+    double vout[NUM_SAMPLES_PER_PERIOD];
+    // characteristics of vin
     sine vin_parameters;
+    // characteristics of vout
     sine vout_parameters;
+    // impedence
     complex Z;
+    // buffer for storing impedence magnitudes
+    double magnitude_spectrum[NUM_FREQUENCIES_FOR_SPECTROSCOPY];
+    // buffer for storing phase magnitudes
+    double phase_spectrum[NUM_FREQUENCIES_FOR_SPECTROSCOPY];
 
     for (int i = 0; i < num_frequencies; i++) {
-        measure_vin_vout_subsequent(frequencies[i], amplitude, pwm_pin, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+        measure_vin_vout_subsequent(
+            frequencies[i],
+            amplitude,
+            pwm_pin,
+            pwm_dma_channel,
+            reset_dma_channel,
+            adc_dma_channel,
+            input_period,
+            output_period
+        );
 
         samples_to_voltages(input_period, vin, NUM_SAMPLES_PER_PERIOD);
         samples_to_voltages(output_period, vout, NUM_SAMPLES_PER_PERIOD);
@@ -239,13 +341,14 @@ void print_impedence_spectrum(
         vin_parameters = characterize(vin, frequencies[i], NUM_SAMPLES_PER_PERIOD);
         vout_parameters = characterize(vout, frequencies[i], NUM_SAMPLES_PER_PERIOD);
 
-        Z = impedence(vin_parameters, vout_parameters, RF);
+        Z = impedence(vin_parameters, vout_parameters, RF_OHMS);
         magnitude_spectrum[i] = Z.magnitude;
         phase_spectrum[i] = Z.phase;
 
     }
 
-    // print stuff
+    // print stuff;
+    // samples are seperated by commas
     for (int i = 0; i < num_frequencies; i++) {
         printf("%.3f,", magnitude_spectrum[i]);
     }
@@ -257,9 +360,19 @@ void print_impedence_spectrum(
 }
 
 int main(void) {
+    // for reading in command
+    //  t: get temperature and pressure
+    //  f: get impedence for a single frequency
+    //  s: get impedence spectrum
     int16_t command;
+    // frequency of vin and vout sine waves
     double frequency;
+    // amplitude of vin sine wave
     double amplitude;
+    // buffer reading in one period of vin
+    uint8_t input_period[NUM_SAMPLES_PER_PERIOD];
+    // buffer reading in one period of vout
+    uint8_t output_period[NUM_SAMPLES_PER_PERIOD];
 
     stdio_init_all();
 
@@ -273,7 +386,17 @@ int main(void) {
 
     // do a dummy run, just to get things initialized
     frequency = 1000.0;
-    measure_vin_vout_initial(frequency, AMPLITUDE, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+    amplitude = 0.7;
+    measure_vin_vout_initial(
+        frequency,
+        amplitude,
+        INPUT_SIGNAL_PIN,
+        pwm_dma_channel,
+        reset_dma_channel,
+        adc_dma_channel,
+        input_period,
+        output_period
+    );
 
     while (true) {
         command = getchar_timeout_us(SERIAL_IO_WAIT_TIME_US);
@@ -283,12 +406,31 @@ int main(void) {
                 break;
             case 's':
                 amplitude = read_amplitude_from_serial();
-                print_impedence_spectrum(frequencies_for_spectroscopy, NUM_FREQUENCIES_FOR_SPECTROSCOPY, amplitude, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+                print_impedence_spectrum(
+                    FREQUENCIES_FOR_SPECTROSCOPY,
+                    NUM_FREQUENCIES_FOR_SPECTROSCOPY,
+                    amplitude,
+                    INPUT_SIGNAL_PIN,
+                    pwm_dma_channel,
+                    reset_dma_channel,
+                    adc_dma_channel,
+                    input_period,
+                    output_period
+                );
                 break;
             case 'f':
                 frequency = read_frequency_from_serial();
                 amplitude = read_amplitude_from_serial();
-                print_vin_vout_single_frequency(frequency, amplitude, INPUT_SIGNAL_PIN, pwm_dma_channel, reset_dma_channel, adc_dma_channel);
+                print_vin_vout_single_frequency(
+                    frequency,
+                    amplitude,
+                    INPUT_SIGNAL_PIN,
+                    pwm_dma_channel,
+                    reset_dma_channel,
+                    adc_dma_channel,
+                    input_period,
+                    output_period
+                );
                 break;
         }
     }

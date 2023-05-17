@@ -9,6 +9,9 @@
 
 #include "pwm.h"
 
+/// @brief initializes a pin for generating a sine wave via pwm
+/// @param pin_slice slice of gpio pin
+/// @param sine_table_length length of array used to generated sine wave
 void init_pwm(int pin_slice, int sine_table_length) {
     pwm_config config = pwm_get_default_config();
     // it is convenient to set wrap = 2*length
@@ -18,6 +21,13 @@ void init_pwm(int pin_slice, int sine_table_length) {
     pwm_init(pin_slice, &config, true);
 }
 
+/// @brief initializes two dmas, one for writing the pwm counter compare value and one for resetting the first dma
+/// @param pwm_dma_channel reads values from a sine table and writes them the pwm counter compare register
+/// @param reset_dma_channel resets the pwm dma channel once it has completed
+/// @param pwm_pin_slice slice of gpio pin generating the pwm signal
+/// @param sine_table table containig values for one period of a sine wave; the values are pwm counter compare values
+/// @param sine_table_pointer pointer to the sine table
+/// @param sine_table_length  length of the sine table
 void init_pwm_dma(int pwm_dma_channel, int reset_dma_channel, int pwm_pin_slice, uint32_t * sine_table, uint32_t ** sine_table_pointer, int sine_table_length) {
     dma_channel_config pwm_dma_channel_config = dma_channel_get_default_config(pwm_dma_channel);
     dma_channel_config reset_dma_channel_config = dma_channel_get_default_config(reset_dma_channel);

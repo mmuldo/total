@@ -11,3 +11,4 @@ python-dateutil==2.8.2
 zipp==3.13.0
 pyserial==3.5
 typer==0.9.0
+pandas==2.0.1

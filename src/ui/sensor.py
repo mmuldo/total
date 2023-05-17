@@ -11,73 +11,151 @@ import csv
 from pathlib import Path
 from dataclasses import dataclass
 
-# rate at which information is transferred over serial port
-BAUDRATE = 115200
+plt.style.use('ggplot')
 
 # minimum frequency at which sensor can measure impedence
 MIN_FREQ_HZ = 100
 # maximum frequency at which sensor can measure impedence
 MAX_FREQ_HZ = 10000
+# minimum amplitude at which sensor can measure impedence
+MIN_AMPLITUDE_HZ = 0.1
+# maximum amplitude at which sensor can measure impedence
+MAX_AMPLITUDE_HZ = 1.0
 
-# these should match the values in conductivity.c
+
+# these should match the values in sensor.c
 # number of periods coming from serial i/o
 NUM_PERIODS = 10
 # number of samples in each period coming from serial i/o
 NUM_SAMPLES_PER_PERIOD = 25
 
+# these should match the values in sensor.c
+# frequencies to use for performing impedence spectroscopy
+FREQUENCIES_FOR_SPECTROSCOPY = [
+    100,
+    200,
+    300,
+    400,
+    500,
+    600,
+    700,
+    800,
+    900,
+    1000,
+    2000,
+    3000,
+    4000,
+    5000,
+    6000,
+    7000,
+    8000,
+    9000,
+    10000
+]
+
 # amount of time to wait in between serial i/o reads;
 # make this ~2x the amount of time waited between serial i/o writes
-SERIAL_WAIT_S = 0.002
+SERIAL_WAIT_S = 0.001
 
 # feedback resistance in transimpedence amplifier in ohms
 TIA_RF = 10e3
 
 # max voltage of pico in volts
 VDD = 3.3
+# number of bits in an ADC sample
+ADC_NUM_BITS = 8
+# converts an adc sample to a voltage
+ADC_CONVERT = VDD / ((1 << ADC_NUM_BITS) - 1)
 
-def get_args() -> tuple[int, str, bool, str]:
+@dataclass
+class Sine:
     '''
-    parses command-line arguments
+    datastructure representing a sine wave:
+        sine(t) = A*sin*(2*pi*f*t + p) + o
+
+    Attributes
+    ----------
+    amplitude : float
+        A [V]
+    frequency : float
+        f [Hz]
+    phase : float
+        p [Radians]
+    offset : float
+        o [V]
+    '''
+    amplitude : float
+    frequency : float
+    phase : float
+    offset : float
+
+
+def characterize(single_period: np.ndarray[NUM_SAMPLES_PER_PERIOD], frequency: float) -> Sine:
+    '''
+    given one period of a sine wave, finds its characteristic properties
+
+    Parameters
+    ----------
+    single_period : (NUM_SAMPLES_PER_PERIOD,) shaped np.ndarray
+        one period of the sine wave
+    frequency : float
+        the frequency of the sine wave
 
     Returns
     -------
-    int
-        frequency
-        if not specified at command-line, this will be -1 (indicating error)
-    str
-        path to csv file where to save output;
-        if not specified, will default to "" (won't save)
-    bool
-        whether or not to plot the resulting waves
-        if not specified at command-line, this will default to False
-    str
-        path to png file where to save plot;
-        if not specified, will default to "" (won't save)
+    Sine
+        characterized sine wave
     '''
-    frequency = -1
-    output_file = ''
-    plot = False
-    plot_file = ''
-    amplitude = 0.6
+    # timestep
+    dt = 1/(frequency*len(single_period))
 
-    i = 0
-    while i < len(sys.argv):
-        if sys.argv[i].isdigit():
-            frequency = int(sys.argv[i])
-        elif sys.argv[i] == '--output-file':
-            output_file = sys.argv[i+1]
-            i += 1
-        elif sys.argv[i] == '--plot':
-            plot = True
-        elif sys.argv[i] == '--plot-file':
-            plot_file = sys.argv[i+1]
-            i += 1
-        elif sys.argv[i] == '--amplitude':
-            amplitude = float(sys.argv[i+1])
-            i += 1
-        i += 1
+    i_min = np.argmin(single_period)
+    v_min = np.min(single_period)
+    i_max = np.argmax(single_period)
+    v_max = np.max(single_period)
 
-    return frequency, output_file, plot, plot_file, amplitude
+    offset = (v_max + v_min) / 2
+    amplitude = v_max - offset
+    phase = np.pi/2 - 2*np.pi*frequency*i_max*dt
+
+    return Sine(amplitude,frequency,phase,offset)
+
+def impedence(
+    vin : np.ndarray[NUM_SAMPLES_PER_PERIOD],
+    vout : np.ndarray[NUM_SAMPLES_PER_PERIOD],
+    frequency : float,
+    Rf : float
+) -> complex:
+    '''
+    calculates impedence based on input and output waveforms according to the following formula:
+        Z = -Rf * vin/vout
+
+    Parameters
+    ----------
+    vin : (NUM_SAMPLES_PER_PERIOD,) shaped np.ndarray
+        input signal to sensor (in V)
+    vout : (NUM_SAMPLES_PER_PERIOD,) shaped np.ndarray
+        output signal from sensor
+    frequency : float
+        the frequency of the signals (in V)
+    Rf : float
+        feedback resistor in the transimpedence amplifier (in Ohms)
+
+    Returns
+    -------
+    complex
+        the complex impedence Z = R + Xj (in Ohms)
+    '''
+    vin_sine = characterize(vin, frequency)
+    vout_sine = characterize(vout, frequency)
+
+    magnitude = Rf*vin_sine.amplitude/vout_sine.amplitude
+    phase = vin_sine.phase - vout_sine.phase + np.pi
+
+    R = magnitude*np.cos(phase)
+    X = magnitude*np.sin(phase)
+
+    return R+1j*X
 
 def format_impedence(impedence: complex) -> str:
     '''
@@ -101,7 +179,7 @@ def format_impedence(impedence: complex) -> str:
 
     return f'{R} {X_sign} j{X_abs}'
 
-def plot(
+def vin_vout_plot(
     vin: np.ndarray,
     vout: np.ndarray,
     freq: Any,
@@ -146,9 +224,9 @@ def plot(
     plt.plot(t_vout, vout)
 
     # set labels and title, etc.
-    plt.xlabel('ms')
-    plt.ylabel('V')
-    plt.legend(['input signal to sensor', 'signal output from sensor'])
+    plt.xlabel('Time [ms]')
+    plt.ylabel('Voltage [V]')
+    plt.legend([r'$V_{in}$', r'$V_{out}$'])
     title = f'{freq} Hz frequency'
     if impedence: title += f'; Z = {format_impedence(impedence)}'
     plt.title(title)
@@ -159,227 +237,200 @@ def plot(
     if show_plot: plt.show()
     plt.close()
 
-@dataclass
-class Sine:
-    amplitude : float
-    frequency : float
-    phase : float
-    offset : float
+def bode_plot(
+    magnitudes: np.ndarray,
+    phases: np.ndarray,
+    show_plot: bool = False,
+    plot_file: str = '',
+):
+    '''
+    gives bode plot of a spectrum of impedences
 
-def characterize(period, frequency):
-    dt = 1/(frequency*len(period))
+    Parameters
+    ----------
+    magnitudes : np.ndarray
+        impedence magnitudes at each frequency
+    phases : np.ndarray
+        impedence phases at each frequency
+    show_plot : bool, optional
+        if true, display plot to user;
+        defaults to false
+    plot_file : str, optional
+        png file where plot should be saved;
+        defaults to "" in which case no plot is saved
+    '''
+    if not show_plot and not plot_file:
+        return
 
-    i_min = np.argmin(period)
-    v_min = np.min(period)
-    i_max = np.argmax(period)
-    v_max = np.max(period)
+    fig, (ax_mag, ax_phase) = plt.subplots(nrows=2)
+    fig.suptitle('Bode Plot')
 
-    offset = (v_max + v_min) / 2
-    amplitude = v_max - offset
-    phase = np.pi/2 - 2*np.pi*frequency*i_max*dt
+    ax_mag.loglog(FREQUENCIES_FOR_SPECTROSCOPY, magnitudes)
+    ax_mag.set_xlabel('Frequency [Hz]')
+    ax_mag.set_ylabel('Magnitude [$\Omega$]')
 
-    return Sine(amplitude,frequency,phase,offset)
+    ax_phase.semilogx(FREQUENCIES_FOR_SPECTROSCOPY, phases)
+    ax_phase.set_xlabel('Frequency [Hz]')
+    ax_phase.set_ylabel('Phase [Radians]')
+    ax_phase.set_ylim(-np.pi, np.pi)
+    ax_phase.set_yticks([-np.pi, -np.pi/2, 0, np.pi/2, np.pi], ['$-\pi$', r'$-\frac{{\pi}}{{2}}$', '$0$', r'$\frac{{\pi}}{{2}}$', '$\pi$'])
 
-def impedence(vin, vout, frequency, Rf):
-    vin_sine = characterize(vin, frequency)
-    vout_sine = characterize(vout, frequency)
-
-    magnitude = Rf*vin_sine.amplitude/vout_sine.amplitude
-    phase = vin_sine.phase - vout_sine.phase + np.pi
-
-    R = magnitude*np.cos(phase)
-    X = magnitude*np.sin(phase)
-
-    return R+1j*X
+    if plot_file:
+        Path(plot_file).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_file)
+    if show_plot: plt.show()
+    plt.close()
 
 def get_impedence_single_frequency(
     frequency: int,
     amplitude: float,
     ser: serial.Serial,
     show_plot: bool = False,
-):
+    plot_file: str = '',
+) -> complex:
+    '''
+    measure impedence at specified frequency
+
+    Parameters
+    ----------
+    frequency : int
+        frequency for waveforms
+    amplitude : float
+        amplitude for waveforms
+    ser : serial.Serial
+        serial connection
+    show_plot : bool, optional
+        if True, presents a plot of waveforms to user; default is False
+    plot_file : str, optional
+        if not empty, saves plot of waveforms to specified path; default is ''
+
+    Returns
+    -------
+    complex
+        the complex impedence Z = R + Xj (in Ohms)
+    '''
+    # make sure serial buffers don't have residual samples
     ser.reset_input_buffer()
     ser.reset_output_buffer()
 
+    # send over frequency and amplitude parameters
     ser.write(f'f{frequency},{amplitude},'.encode('utf-8'))
 
+    # wait for vin and vout waveforms to be returned;
+    # each waveform will have NUM_SAMPLES_PER_PERIOD entries
     while ser.in_waiting < 2*NUM_SAMPLES_PER_PERIOD : pass
 
-    samples = [sample for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)]
-    samples = 3.3/((1<<8)-1) * np.array(samples)
+    # since the adc takes 8-bit samples, and each ASCII character
+    # is represented by an 8-bit digit, we can just read the
+    # samples directly without having to decode them
+    samples = ADC_CONVERT * np.array([
+        sample
+        for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)
+    ])
 
+    # assume that the first half of samples are vin and the second half are vout
     vin = samples[:NUM_SAMPLES_PER_PERIOD]
     vout = samples[NUM_SAMPLES_PER_PERIOD:]
 
     Z = impedence(vin, vout, frequency, Rf=TIA_RF)
 
-    plot(vin, vout, frequency, Z, show_plot)
+    vin_vout_plot(vin, vout, frequency, Z, show_plot, plot_file)
 
     return Z
 
 def get_impedence_spectrum(
     amplitude: float,
     ser: serial.Serial,
-):
+    show_plots: bool = False,
+    bode_plot_file: str = '',
+) -> tuple[np.ndarray, np.ndarray]:
+    '''
+    performs impedence spectroscopy for the frequencies specified in FREQUENCIES_FOR_SPECTROSCOPY
+
+    Parameters
+    ----------
+    amplitude : float
+        amplitude of each of the waveforms
+    ser : serial.Serial
+        serial connection
+    show_plots : bool, optional
+        if true, display plots to user;
+        defaults to false
+    bode_plot_file : str, optional
+        png file where bode plot should be saved;
+        defaults to "" in which case no plot is saved
+
+    Returns
+    -------
+    (len(FREQUENCIES_FOR_SPECTROSCOPY),) shaped np.ndarray
+        magnitudes for each impedence
+    (len(FREQUENCIES_FOR_SPECTROSCOPY),) shaped np.ndarray
+        phases for each impedence
+    '''
+    # make sure serial buffers don't have residual samples
     ser.reset_input_buffer()
     ser.reset_output_buffer()
 
+    # send over frequency and amplitude parameters
     ser.write(f's{amplitude},'.encode('utf-8'))
 
-    prev_in_waiting = 0
+    # wait for pico to finish sending all samples over
     while ser.in_waiting == 0: pass
+    prev_in_waiting = 0
     while ser.in_waiting != prev_in_waiting:
         prev_in_waiting = ser.in_waiting
-        time.sleep(0.001)
+        time.sleep(SERIAL_WAIT_S)
 
-    from_serial = ser.read_until(size=ser.in_waiting).decode('utf-8')
-    samples0 = [sample for sample in from_serial.split(',')]
-    samples = np.array([float(sample) for sample in samples0])
-    freqs = [100, 300, 500, 700, 900, 1000, 3000, 5000, 7000, 9000]
-    mags = samples[:10]
-    phases = samples[10:]
-    phases = np.array([phase if phase < np.pi else phase - 2*np.pi for phase in phases])
+    # read in samples
+    samples = np.array([
+        float(sample) 
+        for sample in ser.read_until(
+            size=ser.in_waiting
+        ).decode('utf-8').split(',')
+    ])
 
-    plt.loglog(freqs, mags)
-    plt.show()
-    plt.plot(freqs, phases)
-    plt.xscale('log')
-    plt.show()
+    # assume magnitudes are the first half of the samples and phases are the second half
+    magnitudes = samples[:len(FREQUENCIES_FOR_SPECTROSCOPY)]
+    phases = samples[len(FREQUENCIES_FOR_SPECTROSCOPY):]
+    # normalize phases
+    phases = np.arctan2(np.sin(phases), np.cos(phases))
+
+    bode_plot(magnitudes, phases, show_plots, bode_plot_file)
+
+    return magnitudes, phases
+
 
 def get_temperature_and_pressure(
     ser: serial.Serial,
-):
+) -> tuple[float, float]:
+    '''
+    gets temperature and pressure measurements
+
+    Parameters
+    ----------
+    ser: serial.Serial
+        serial connection
+
+    Returns
+    -------
+    float
+        temperature (in C)
+    float
+        pressure (in mBars)
+    '''
     # make sure nothing is on the channel
     ser.reset_input_buffer()
     ser.reset_output_buffer()
 
     ser.write(f't'.encode('utf-8'))
 
-    while ser.in_waiting < 11 : pass
-    temperature, pressure = ser.read_until(size=11).decode('utf-8').split(',')
+    # wait for pico to finish sending all samples over
+    while ser.in_waiting == 0: pass
+    prev_in_waiting = 0
+    while ser.in_waiting != prev_in_waiting:
+        prev_in_waiting = ser.in_waiting
+        time.sleep(0.001)
+
+    temperature, pressure = ser.read_until(size=ser.in_waiting).decode('utf-8').split(',')
 
     return float(temperature), float(pressure)
-
-def get_measurements(
-    frequency: int,
-    amplitude: float,
-    ser: serial.Serial,
-    output_file: str = '',
-    show_plot: bool = False,
-    plot_file: str = '',
-) -> tuple[complex, float, float]:
-    '''
-    prompts user for frequency input, then sends job to pico over serial i/o.
-    pico then returns sampled singals over serial i/o, which are used to calcuate
-    the impedence. the temperature and pressure are also measured.
-
-    Parameters
-    ----------
-    frequency : int
-        frequency of sine wave
-    ser : serial.Serial
-        serial i/o connection
-    output_file : str, optional
-        csv file where output should be saved;
-        defaults to "", in which case output isn't saved
-    show_plot : bool, optional
-        if True, plot resulting vin and vout waveforms and display plot to user
-    plot_file : str, optional
-        png file where plot should be saved;
-        defaults to "", in which case plot isn't saved
-
-    Returns
-    -------
-    complex
-        complex impedence
-    float
-        temperature
-    float
-        pressure
-    '''
-    # wait a second to make sure everything's good
-    #time.sleep(1)
-
-    # make sure nothing is on the channel
-    ser.reset_input_buffer()
-    ser.reset_output_buffer()
-
-    # write the frequency input to serial port
-    # ser.write(f'{frequency}\n'.encode('utf-8'))
-    serialio.write_string(f'{frequency}', ser)
-
-    # wait for readings to be taken
-    while ser.in_waiting == 0: pass
-
-    time.sleep(1)
-    samples = []        
-    #while ser.in_waiting > 0:
-    samples += [sample for sample in ser.read_until(size=2*NUM_SAMPLES_PER_PERIOD)]
-    samples = 3.3/((1<<8)-1) * np.array(samples)
-
-    # assume samples for conductivity measurement are the first portion of readings
-    #samples = np.array(readings)
-    #samples = np.array(readings[:-2])
-    # assume temperature measurement is second to last measurement
-    #temperature = readings[-2]
-    temperature = 0
-    # assume pressure measurement is last measurement
-    #pressure = readings[-1]
-    pressure = 0
-    time.sleep(1)
-    if True:
-        temperature = float(serialio.readline(ser))
-        pressure = float(serialio.readline(ser))
-
-    # assume vin are the even-indexed samples
-    #vin = samples[::2]
-    vin = samples[:NUM_SAMPLES_PER_PERIOD]
-    # assume vout are the odd-indexed samples
-    #vout = samples[1::2]
-    vout = samples[NUM_SAMPLES_PER_PERIOD:]
-
-    # take average signal over each period
-    #vin = vin.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
-    #vout = vout.reshape((NUM_PERIODS, NUM_SAMPLES_PER_PERIOD)).mean(axis=0)
-
-    impedence = impedence_dot_product(vin, vout, Rf=TIA_RF, offset=0)
-
-    if output_file:
-        path = Path(output_file)
-        if not path.is_file():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_file, 'w') as f:
-                csv_file = csv.writer(f)
-                csv_file.writerow(('frequency', 'resistance', 'reactance', 'temperature', 'pressure'))
-
-        with open(output_file, 'a') as f:
-            csv_file = csv.writer(f)
-            csv_file.writerow((frequency, impedence.real, impedence.imag, temperature, pressure))
-
-    plot(vin, vout, frequency, impedence, show_plot, plot_file)
-
-    return impedence, temperature, pressure
-
-def main():
-    frequency, output_file, show_plot, plot_file, amplitude = get_args()
-
-    if frequency > MAX_FREQ_HZ or frequency < MIN_FREQ_HZ:
-        # if frequency invalid, exit
-        print(f'Error: please specify integer frequency between {MIN_FREQ_HZ} to {MAX_FREQ_HZ} Hz')
-        exit(1)
-
-    # initialize serial i/o
-    ser = serialio.init_serial()
-
-    # get measurement
-    #impedence, temperature, pressure = get_measurements(frequency, ser, output_file, show_plot, plot_file)
-    impedence = get_impedence_single_frequency(frequency, amplitude, ser, show_plot)
-    #temperature, pressure = get_temperature_and_pressure(ser)
-    #get_impedence_spectrum(amplitude, ser)
-
-    print(f'Impedence: {format_impedence(impedence)} Ohms')
-    #print(f'Temperature: {temperature} C')
-    #print(f'Pressure: {pressure} mBars')
-
-if __name__ == '__main__':
-    main()
