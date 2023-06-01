@@ -62,17 +62,20 @@ def single(
     plot_file: str = typer.Option('', help='png file to save results'),
     output_file: str = typer.Option('', help='csv file to save results'),
     include_envirostats: bool = typer.Option(True, help='also get temperature and pressure measurements'),
+    conversion_factor: float = typer.Option(None, help='if set, converts all admittance quantities from S to uS/cm using this factor')
 ):
-    '''Gets impedence measurment at a single frequency.'''
+    '''Gets admittance measurement at a single frequency.'''
+    admittance_units = 'S' if conversion_factor is None else 'uS/cm'
+    
     ser = serialio.init_serial()
 
-    Z = sensor.get_impedence_single_frequency(frequency, amplitude, ser, show_plot, plot_file)
-    print(f'Impedence: {sensor.format_impedence(Z)} Ohms')
+    Y = sensor.get_admittance_single_frequency(frequency, amplitude, ser, show_plot, plot_file, conversion_factor)
+    print(f'Admittance: {sensor.format_admittance(Y)} {admittance_units}')
 
     data = {
         'Frequency (Hz)': frequency,
-        'Resistance (Ohms)': Z.real,
-        'Reactance (Ohms)': Z.imag,
+        f'Conductance ({admittance_units})': Y.real,
+        f'Susceptance ({admittance_units})': Y.imag,
     }
     if include_envirostats:
         temperature, pressure = sensor.get_temperature_and_pressure(ser)
@@ -90,17 +93,21 @@ def sweep(
     amplitude: float = typer.Option(0.7, help=f'amplitude of sinusoid (between {sensor.MIN_AMPLITUDE_HZ} and {sensor.MAX_AMPLITUDE_HZ} V)'),
     show_plots: bool = typer.Option(False, help='presents bode plot immediately'),
     bode_plot_file: str = typer.Option('', help='png file to save bode plot'),
-    magnitude_file: str = typer.Option('', help='csv file to save impedence magnitudes'),
-    phase_file: str = typer.Option('', help='csv file to save impedence phases'),
+    magnitude_file: str = typer.Option('', help='csv file to save admittance magnitudes'),
+    phase_file: str = typer.Option('', help='csv file to save admittance phases'),
     include_envirostats: bool = typer.Option(True, help='also get temperature and pressure measurements'),
     envirostats_file: str = typer.Option('', help='csv file to save temperature and pressure data'),
+    conversion_factor: float = typer.Option(None, help='if set, converts all admittance quantities from S to uS/cm using this factor')
 ):
+    '''Gets admittance measurement over a range of frequencies.'''
+    admittance_units = 'S' if conversion_factor is None else 'uS/cm'
+
     ser = serialio.init_serial()
 
-    magnitudes, phases = sensor.get_impedence_spectrum(amplitude, ser, show_plots, bode_plot_file)
+    magnitudes, phases = sensor.get_admittance_spectrum(amplitude, ser, show_plots, bode_plot_file, conversion_factor)
     print(pd.DataFrame({
         'Frequency (Hz)': sensor.FREQUENCIES_FOR_SPECTROSCOPY,
-        'Magnitude (Ohms)': magnitudes,
+        f'Magnitude ({admittance_units})': magnitudes,
         'Phase (Radians)': phases,
     }))
 
@@ -131,6 +138,30 @@ def sweep(
                     'Pressure (mBars)': pressure,
                 }
             )
+
+@app.command()
+def sweep_from_files(
+    show_plots: bool = typer.Option(False, help='presents bode plot immediately'),
+    bode_plot_file: str = typer.Option('', help='png file to save bode plot'),
+    magnitude_file: str = typer.Option('', help='csv file to save admittance magnitudes'),
+    phase_file: str = typer.Option('', help='csv file to save admittance phases'),
+    admittance_units: str = typer.Option('S', help='units to use for admittance data (e.g. S or uS/cm)')
+):
+    '''Processes existing admittance data over a range of frequencies.'''
+    mag_df = pd.read_csv(magnitude_file)
+    phase_df = pd.read_csv(phase_file)
+
+    avg_mags = mag_df.mean(axis=0)
+    avg_phases = phase_df.mean(axis=0)
+
+    print(pd.DataFrame({
+        'Frequency (Hz)': sensor.FREQUENCIES_FOR_SPECTROSCOPY,
+        f'Magnitude ({admittance_units})': avg_mags,
+        'Phase (Radians)': avg_phases,
+    }))
+
+    sensor.bode_plot(avg_mags, avg_phases, show_plots, bode_plot_file, admittance_units)
+
 
 if __name__ == '__main__':
     app()

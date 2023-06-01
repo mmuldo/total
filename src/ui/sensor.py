@@ -120,15 +120,16 @@ def characterize(single_period: np.ndarray[NUM_SAMPLES_PER_PERIOD], frequency: f
 
     return Sine(amplitude,frequency,phase,offset)
 
-def impedence(
+def admittance(
     vin : np.ndarray[NUM_SAMPLES_PER_PERIOD],
     vout : np.ndarray[NUM_SAMPLES_PER_PERIOD],
     frequency : float,
-    Rf : float
+    Rf : float,
+    conversion_factor : Optional[float] = None
 ) -> complex:
     '''
-    calculates impedence based on input and output waveforms according to the following formula:
-        Z = -Rf * vin/vout
+    calculates admittance based on input and output waveforms according to the following formula:
+        Y = -(1/Rf) * (vout/vin)
 
     Parameters
     ----------
@@ -140,32 +141,34 @@ def impedence(
         the frequency of the signals (in V)
     Rf : float
         feedback resistor in the transimpedence amplifier (in Ohms)
+    conversion_factor : float, optional
+        if set, converts all admittance quantities from S to uS/cm using this factor
 
     Returns
     -------
     complex
-        the complex impedence Z = R + Xj (in Ohms)
+        the complex admittance Y = G + Bj (in S or uS/cm depending on the conversion factor)
     '''
     vin_sine = characterize(vin, frequency)
     vout_sine = characterize(vout, frequency)
 
-    magnitude = Rf*vin_sine.amplitude/vout_sine.amplitude
-    phase = vin_sine.phase - vout_sine.phase + np.pi
+    magnitude = (1/Rf)*vout_sine.amplitude/vin_sine.amplitude
+    phase = vout_sine.phase - vin_sine.phase - np.pi
 
-    R = magnitude*np.cos(phase)
-    X = magnitude*np.sin(phase)
+    G = magnitude*np.cos(phase) * (1 if conversion_factor is None else conversion_factor)
+    B = magnitude*np.sin(phase)
 
-    return R+1j*X
+    return G+1j*B
 
-def format_impedence(impedence: complex) -> str:
+def format_admittance(admittance: complex) -> str:
     '''
-    formats impedence as
-        R + jX
-    where R and X are in scientific notation with 3 significant digits of precision
+    formats admittance as
+        G + jB
+    where G and B are in scientific notation with 3 significant digits of precision
 
     Parameters
     ----------
-    impedence : complex
+    admittance : complex
         complex number
 
     Returns
@@ -173,19 +176,20 @@ def format_impedence(impedence: complex) -> str:
     str
         formatted complex number
     '''
-    R = f'{impedence.real:0.2E}'
-    X_abs = f'{np.abs(impedence.imag):0.2E}'
-    X_sign = f'{"+-"[int(impedence.imag < 0)]}'
+    G = f'{admittance.real:0.2E}'
+    B_abs = f'{np.abs(admittance.imag):0.2E}'
+    B_sign = f'{"+-"[int(admittance.imag < 0)]}'
 
-    return f'{R} {X_sign} j{X_abs}'
+    return f'{G} {B_sign} j{B_abs}'
 
 def vin_vout_plot(
     vin: np.ndarray,
     vout: np.ndarray,
     freq: Any,
-    impedence: Optional[complex] = None,
+    admittance: Optional[complex] = None,
     show_plot: bool = False,
     plot_file: str = '',
+    admittance_units: str = 'S',
 ):
     '''
     plots the input signal and output signal read in on the adc pins of the pico
@@ -193,14 +197,14 @@ def vin_vout_plot(
     Parameters
     ----------
     vin : np.ndarray
-        signal being fed into the impedence that is being sensed
+        signal being fed into the admittance that is being sensed
     vout : np.ndarray
-        output signal from the impedence that is being sensed
+        output signal from the admittance that is being sensed
     freq : Any
         frequency of signals. must be convertible to an int.
-    impedence : complex, optional
-        the impedence measurement based on these voltages;
-        default is none, in which case the impedence measurement will not
+    admittance : complex, optional
+        the admittance measurement based on these voltages;
+        default is none, in which case the admittance measurement will not
         be included in the plot
     show_plot : bool, optional
         if true, display plot to user;
@@ -208,6 +212,8 @@ def vin_vout_plot(
     plot_file : str, optional
         png file where plot should be saved;
         defaults to "" in which case no plot is saved
+    admittance_units : str, optional
+        S or uS/cm; default is S
     '''
     if not show_plot and not plot_file:
         return
@@ -228,7 +234,7 @@ def vin_vout_plot(
     plt.ylabel('Voltage [V]')
     plt.legend([r'$V_{in}$', r'$V_{out}$'])
     title = f'{freq} Hz frequency'
-    if impedence: title += f'; Z = {format_impedence(impedence)}'
+    if admittance: title += f'; Y = {format_admittance(admittance)} {admittance_units}'
     plt.title(title)
 
     if plot_file:
@@ -242,22 +248,25 @@ def bode_plot(
     phases: np.ndarray,
     show_plot: bool = False,
     plot_file: str = '',
+    admittance_units: str = 'S',
 ):
     '''
-    gives bode plot of a spectrum of impedences
+    gives bode plot of a spectrum of admittances
 
     Parameters
     ----------
     magnitudes : np.ndarray
-        impedence magnitudes at each frequency
+        admittance magnitudes at each frequency
     phases : np.ndarray
-        impedence phases at each frequency
+        admittance phases at each frequency
     show_plot : bool, optional
         if true, display plot to user;
         defaults to false
     plot_file : str, optional
         png file where plot should be saved;
         defaults to "" in which case no plot is saved
+    admittance_units : str, optional
+        S or uS/cm; default is S
     '''
     if not show_plot and not plot_file:
         return
@@ -267,7 +276,7 @@ def bode_plot(
 
     ax_mag.loglog(FREQUENCIES_FOR_SPECTROSCOPY, magnitudes)
     ax_mag.set_xlabel('Frequency [Hz]')
-    ax_mag.set_ylabel('Magnitude [$\Omega$]')
+    ax_mag.set_ylabel(f'Magnitude [{admittance_units}]')
 
     ax_phase.semilogx(FREQUENCIES_FOR_SPECTROSCOPY, phases)
     ax_phase.set_xlabel('Frequency [Hz]')
@@ -281,15 +290,16 @@ def bode_plot(
     if show_plot: plt.show()
     plt.close()
 
-def get_impedence_single_frequency(
+def get_admittance_single_frequency(
     frequency: int,
     amplitude: float,
     ser: serial.Serial,
     show_plot: bool = False,
     plot_file: str = '',
+    conversion_factor : Optional[float] = None
 ) -> complex:
     '''
-    measure impedence at specified frequency
+    measure admittance at specified frequency
 
     Parameters
     ----------
@@ -303,12 +313,16 @@ def get_impedence_single_frequency(
         if True, presents a plot of waveforms to user; default is False
     plot_file : str, optional
         if not empty, saves plot of waveforms to specified path; default is ''
+    conversion_factor : float, optional
+        if set, converts all admittance quantities from S to uS/cm using this factor
 
     Returns
     -------
     complex
-        the complex impedence Z = R + Xj (in Ohms)
+        the complex admittance Y = G + Bj (in Siemens)
     '''
+    admittance_units = 'S' if conversion_factor is None else 'uS/cm'
+
     # make sure serial buffers don't have residual samples
     ser.reset_input_buffer()
     ser.reset_output_buffer()
@@ -332,17 +346,18 @@ def get_impedence_single_frequency(
     vin = samples[:NUM_SAMPLES_PER_PERIOD]
     vout = samples[NUM_SAMPLES_PER_PERIOD:]
 
-    Z = impedence(vin, vout, frequency, Rf=TIA_RF)
+    Y = admittance(vin, vout, frequency, Rf=TIA_RF, conversion_factor=conversion_factor)
 
-    vin_vout_plot(vin, vout, frequency, Z, show_plot, plot_file)
+    vin_vout_plot(vin, vout, frequency, Y, show_plot, plot_file, admittance_units)
 
-    return Z
+    return Y
 
-def get_impedence_spectrum(
+def get_admittance_spectrum(
     amplitude: float,
     ser: serial.Serial,
     show_plots: bool = False,
     bode_plot_file: str = '',
+    conversion_factor : Optional[float] = None
 ) -> tuple[np.ndarray, np.ndarray]:
     '''
     performs impedence spectroscopy for the frequencies specified in FREQUENCIES_FOR_SPECTROSCOPY
@@ -359,14 +374,18 @@ def get_impedence_spectrum(
     bode_plot_file : str, optional
         png file where bode plot should be saved;
         defaults to "" in which case no plot is saved
+    conversion_factor : float, optional
+        if set, converts all admittance quantities from S to uS/cm using this factor
 
     Returns
     -------
     (len(FREQUENCIES_FOR_SPECTROSCOPY),) shaped np.ndarray
-        magnitudes for each impedence
+        magnitudes for each admittance
     (len(FREQUENCIES_FOR_SPECTROSCOPY),) shaped np.ndarray
-        phases for each impedence
+        phases for each admittance
     '''
+    admittance_units = 'S' if conversion_factor is None else 'uS/cm'
+
     # make sure serial buffers don't have residual samples
     ser.reset_input_buffer()
     ser.reset_output_buffer()
@@ -395,7 +414,12 @@ def get_impedence_spectrum(
     # normalize phases
     phases = np.arctan2(np.sin(phases), np.cos(phases))
 
-    bode_plot(magnitudes, phases, show_plots, bode_plot_file)
+    # pico sends magnitudes and phases for impedances;
+    # we want admittances (inverse of impedance)
+    magnitudes = (1/magnitudes)*(1 if conversion_factor is None else conversion_factor)
+    phases = -phases
+
+    bode_plot(magnitudes, phases, show_plots, bode_plot_file, admittance_units)
 
     return magnitudes, phases
 
