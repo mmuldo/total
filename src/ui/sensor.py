@@ -290,6 +290,52 @@ def bode_plot(
     if show_plot: plt.show()
     plt.close()
 
+def complex_plot(
+    magnitudes: np.ndarray,
+    phases: np.ndarray,
+    show_plot: bool = False,
+    plot_file: str = '',
+    admittance_units: str = 'S',
+):
+    '''
+    gives complex plane plot of a spectrum of admittances
+
+    Parameters
+    ----------
+    magnitudes : np.ndarray
+        admittance magnitudes at each frequency
+    phases : np.ndarray
+        admittance phases at each frequency
+    show_plot : bool, optional
+        if true, display plot to user;
+        defaults to false
+    plot_file : str, optional
+        png file where plot should be saved;
+        defaults to "" in which case no plot is saved
+    admittance_units : str, optional
+        S or uS/cm; default is S
+    '''
+    if not show_plot and not plot_file:
+         return
+
+    Gs = magnitudes*np.cos(phases)
+    Bs = magnitudes*np.sin(phases)
+
+    plt.plot(Gs, Bs)
+    plt.text(Gs[0], Bs[0], f'{FREQUENCIES_FOR_SPECTROSCOPY[0]} Hz')
+    plt.text(Gs[-1], Bs[-1], f'{FREQUENCIES_FOR_SPECTROSCOPY[-1]} Hz')
+
+    plt.xlabel(f'Conductance [{admittance_units}]')
+    plt.ylabel(f'Susceptance [{admittance_units}]')
+    plt.title('Complex Plane Plot')
+
+    if plot_file:
+        Path(plot_file).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_file)
+    if show_plot: plt.show()
+    plt.close()
+
+
 def get_admittance_single_frequency(
     frequency: int,
     amplitude: float,
@@ -357,6 +403,7 @@ def get_admittance_spectrum(
     ser: serial.Serial,
     show_plots: bool = False,
     bode_plot_file: str = '',
+    complex_plot_file: str = '',
     conversion_factor : Optional[float] = None
 ) -> tuple[np.ndarray, np.ndarray]:
     '''
@@ -373,6 +420,9 @@ def get_admittance_spectrum(
         defaults to false
     bode_plot_file : str, optional
         png file where bode plot should be saved;
+        defaults to "" in which case no plot is saved
+    complex_plot_file : str, optional
+        png file where complex plane plot should be saved;
         defaults to "" in which case no plot is saved
     conversion_factor : float, optional
         if set, converts all admittance quantities from S to uS/cm using this factor
@@ -420,6 +470,7 @@ def get_admittance_spectrum(
     phases = -phases
 
     bode_plot(magnitudes, phases, show_plots, bode_plot_file, admittance_units)
+    complex_plot(magnitudes, phases, show_plots, complex_plot_file, admittance_units)
 
     return magnitudes, phases
 

@@ -93,6 +93,7 @@ def sweep(
     amplitude: float = typer.Option(0.7, help=f'amplitude of sinusoid (between {sensor.MIN_AMPLITUDE_HZ} and {sensor.MAX_AMPLITUDE_HZ} V)'),
     show_plots: bool = typer.Option(False, help='presents bode plot immediately'),
     bode_plot_file: str = typer.Option('', help='png file to save bode plot'),
+    complex_plot_file: str = typer.Option('', help='png file to save complex plane plot'),
     magnitude_file: str = typer.Option('', help='csv file to save admittance magnitudes'),
     phase_file: str = typer.Option('', help='csv file to save admittance phases'),
     include_envirostats: bool = typer.Option(True, help='also get temperature and pressure measurements'),
@@ -104,7 +105,7 @@ def sweep(
 
     ser = serialio.init_serial()
 
-    magnitudes, phases = sensor.get_admittance_spectrum(amplitude, ser, show_plots, bode_plot_file, conversion_factor)
+    magnitudes, phases = sensor.get_admittance_spectrum(amplitude, ser, show_plots, bode_plot_file, complex_plot_file, conversion_factor)
     print(pd.DataFrame({
         'Frequency (Hz)': sensor.FREQUENCIES_FOR_SPECTROSCOPY,
         f'Magnitude ({admittance_units})': magnitudes,
@@ -143,6 +144,7 @@ def sweep(
 def sweep_from_files(
     show_plots: bool = typer.Option(False, help='presents bode plot immediately'),
     bode_plot_file: str = typer.Option('', help='png file to save bode plot'),
+    complex_plot_file: str = typer.Option('', help='png file to save complex plane plot'),
     magnitude_file: str = typer.Option('', help='csv file to save admittance magnitudes'),
     phase_file: str = typer.Option('', help='csv file to save admittance phases'),
     admittance_units: str = typer.Option('S', help='units to use for admittance data (e.g. S or uS/cm)')
@@ -161,6 +163,7 @@ def sweep_from_files(
     }))
 
     sensor.bode_plot(avg_mags, avg_phases, show_plots, bode_plot_file, admittance_units)
+    sensor.complex_plot(avg_mags, avg_phases, show_plots, complex_plot_file, admittance_units)
 
 
 if __name__ == '__main__':
