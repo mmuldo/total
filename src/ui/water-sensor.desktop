@@ -1,6 +1,0 @@
-[Desktop Entry]
-Comment=Opens GUI for running Water Sensor
-Terminal=false
-Name=Water Sensor
-Exec=sh -c "python \$HOME/total/src/ui/gui.py"
-Type=Application
