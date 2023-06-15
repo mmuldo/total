@@ -12,6 +12,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 plt.style.use('ggplot')
+plt.rcParams['figure.figsize'] = (8, 8)
 
 # minimum frequency at which sensor can measure impedence
 MIN_FREQ_HZ = 100
