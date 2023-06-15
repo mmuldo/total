@@ -1,0 +1,2 @@
+void init_pwm(int pin_slice, int sine_table_length);
+void init_pwm_dma(int pwm_dma_channel, int reset_dma_channel, int pwm_pin_slice, uint32_t * sine_table, uint32_t ** sine_table_pointer, int sine_table_length);
